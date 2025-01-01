@@ -108,13 +108,16 @@ const CharacterSelector = ({
               }
               
               const newViewBoxY = selectedCharacter.viewBox.y - selectedCharacter.viewBox.height;
-              setSelectedCharacter(prev => ({
-                ...prev,
-                viewBox: {
-                  ...prev.viewBox,
-                  y: newViewBoxY
-                }
-              }));
+              // 检查是否超出图片顶部
+              if (newViewBoxY >= 0) {
+                setSelectedCharacter(prev => ({
+                  ...prev,
+                  viewBox: {
+                    ...prev.viewBox,
+                    y: newViewBoxY
+                  }
+                }));
+              }
             }}
           >
             上一个
@@ -127,13 +130,16 @@ const CharacterSelector = ({
               }
               
               const newViewBoxY = selectedCharacter.viewBox.y + selectedCharacter.viewBox.height;
-              setSelectedCharacter(prev => ({
-                ...prev,
-                viewBox: {
-                  ...prev.viewBox,
-                  y: newViewBoxY
-                }
-              }));
+              // 检查是否超出图片高度
+              if (newViewBoxY < selectedCharacter.height) {
+                setSelectedCharacter(prev => ({
+                  ...prev,
+                  viewBox: {
+                    ...prev.viewBox,
+                    y: newViewBoxY
+                  }
+                }));
+              }
             }}
           >
             下一个
@@ -146,39 +152,46 @@ const CharacterSelector = ({
             selectedCharacter.viewBox.y,
             selectedCharacter.viewBox.y + charHeightRef.current,
             selectedCharacter.viewBox.y + charHeightRef.current * 2,
-            selectedCharacter.viewBox.y + charHeightRef.current * 3].map((y, index) => (
-            <div 
-              key={index} 
-              style={{ 
-                width: '50px', 
-                height: '50px', 
-                border: index === 3 ? '2px solid blue' : '1px solid #ccc', 
-                overflow: 'hidden',
-                cursor: 'pointer'
-              }}
-              onClick={() => {
-                setSelectedCharacter(prev => ({
-                  ...prev,
-                  viewBox: {
-                    ...prev.viewBox,
-                    y: y
-                  }
-                }));
-              }}
-            >
-              <svg
-                viewBox={`${selectedCharacter.viewBox.x} ${y} ${selectedCharacter.viewBox.width} ${selectedCharacter.viewBox.height}`}
-                preserveAspectRatio="xMidYMid meet"
-                style={{ width: '100%', height: '100%' }}
-              >
-                <image
-                  href={selectedCharacter.src}
-                  width={selectedCharacter.width}
-                  height={selectedCharacter.height}
-                />
-              </svg>
-            </div>
-          ))}
+            selectedCharacter.viewBox.y + charHeightRef.current * 3]
+            .map((y, index) => {
+              const isVisible = y >= 0 && y < selectedCharacter.height;
+              return (
+                <div 
+                  key={index} 
+                  style={{ 
+                    width: '50px', 
+                    height: '50px', 
+                    border: isVisible && y === selectedCharacter.viewBox.y ? '2px solid blue' : '1px solid #ccc', 
+                    overflow: 'hidden',
+                    cursor: isVisible ? 'pointer' : 'default',
+                    visibility: isVisible ? 'visible' : 'hidden'
+                  }}
+                  onClick={() => {
+                    if (isVisible) {
+                      setSelectedCharacter(prev => ({
+                        ...prev,
+                        viewBox: {
+                          ...prev.viewBox,
+                          y: y
+                        }
+                      }));
+                    }
+                  }}
+                >
+                  <svg
+                    viewBox={`${selectedCharacter.viewBox.x} ${y} ${selectedCharacter.viewBox.width} ${selectedCharacter.viewBox.height}`}
+                    preserveAspectRatio="xMidYMid meet"
+                    style={{ width: '100%', height: '100%' }}
+                  >
+                    <image
+                      href={selectedCharacter.src}
+                      width={selectedCharacter.width}
+                      height={selectedCharacter.height}
+                    />
+                  </svg>
+                </div>
+              );
+            })}
         </div>
         <button 
           style={{ marginTop: '10px', padding: '8px 16px' }}
