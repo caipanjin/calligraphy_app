@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 
-const RecentImages = ({ recentImages, image, setImage, handleImageUpload }) => {
+const RecentImages = ({ recentImages, image, setImage, handleImageUpload, setSelectedCharacter }) => {
   const [showRecentImages, setShowRecentImages] = useState(false);
 
   return (
@@ -36,7 +36,10 @@ const RecentImages = ({ recentImages, image, setImage, handleImageUpload }) => {
                     border: image === img ? '2px solid blue' : '1px solid #ccc',
                     borderRadius: '4px'
                   }}
-                  onClick={() => setImage(img)}
+                  onClick={() => {
+                    setImage(img);
+                    setSelectedCharacter(null);
+                  }}
                 />
               ))}
             </div>

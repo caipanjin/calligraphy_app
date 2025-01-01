@@ -136,6 +136,7 @@ const App = () => {
         image={image}
         setImage={setImage}
         handleImageUpload={handleImageUpload}
+        setSelectedCharacter={setSelectedCharacter}
       />
 
       <ImageViewer 
