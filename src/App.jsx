@@ -1,6 +1,9 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Magnifier } from 'react-image-magnifiers';
 import './index.css';
+import RecentImages from './components/RecentImages';
+import ImageViewer from './components/ImageViewer';
+import CharacterSelector from './components/CharacterSelector';
 
 const App = () => {
   const [image, setImage] = useState(() => {
@@ -128,279 +131,26 @@ const App = () => {
   return (
     <div className="container">
       <h2>书法临摹助手</h2>
-      <div style={{ marginBottom: '20px' }}>
-        <div style={{ marginBottom: '10px' }}>
-          <div 
-            style={{ 
-              display: 'flex', 
-              alignItems: 'center', 
-              cursor: 'pointer',
-              marginBottom: showRecentImages ? '10px' : 0
-            }}
-            onClick={() => setShowRecentImages(!showRecentImages)}
-          >
-            <h3 style={{ margin: 0 }}>最近图片</h3>
-            <span style={{ marginLeft: '10px' }}>
-              {showRecentImages ? '▲' : '▼'}
-            </span>
-          </div>
-          {showRecentImages && (
-            <>
-              <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-                {recentImages.map((img, index) => (
-                  <img
-                    key={index}
-                    src={img}
-                    alt={`最近图片 ${index + 1}`}
-                    style={{
-                      width: '100px',
-                      height: '100px',
-                      objectFit: 'cover',
-                      cursor: 'pointer',
-                      border: image === img ? '2px solid blue' : '1px solid #ccc',
-                      borderRadius: '4px'
-                    }}
-                    onClick={() => setImage(img)}
-                  />
-                ))}
-              </div>
-              {recentImages.length === 0 && (
-                <div style={{ color: '#666', marginTop: '10px' }}>
-                  暂无最近打开的图片
-                </div>
-              )}
-              <div style={{ marginTop: '10px' }}>
-                <input type="file" accept="image/*" onChange={handleImageUpload} />
-              </div>
-            </>
-          )}
-        </div>
-      </div>
+      <RecentImages 
+        recentImages={recentImages}
+        image={image}
+        setImage={setImage}
+        handleImageUpload={handleImageUpload}
+      />
 
-      <div className="image-container" style={{ display: image ? 'block' : 'none' }}>
-        <div style={{ position: 'relative' }} ref={imageRef}>
-          {image && !selectedCharacter && (
-            <Magnifier
-              imageSrc={image}
-              largeImageSrc={image}
-              imageAlt="Calligraphy"
-              style={{ 
-                width: '100%', 
-                height: 'auto'
-              }}
-            />
-          )}
-        </div>
-        
-        <div
-          style={{
-            position: 'absolute',
-            top: 0,
-            left: 0,
-            width: '100%',
-            height: '100%',
-            cursor: 'crosshair',
-            backgroundColor: 'rgba(255,255,255,0)',
-            zIndex: 1
-          }}
-          onClick={handleCharacterClick}
-        />
-      </div>
+      <ImageViewer 
+        image={image}
+        handleCharacterClick={handleCharacterClick}
+        imageRef={imageRef}
+        selectedCharacter={selectedCharacter}
+      />
 
       {selectedCharacter && (
-        <div style={{ marginTop: '20px' }}>
-          <div 
-            style={{ 
-              display: 'flex',
-              justifyContent: 'center',
-              alignItems: 'center',
-              height: '300px',
-              width: '300px',
-              margin: '0 auto',
-              border: '1px solid #ccc',
-              borderRadius: '8px',
-              overflow: 'hidden'
-            }}
-          >
-            <svg
-              viewBox={`${selectedCharacter.viewBox.x} ${selectedCharacter.viewBox.y} ${selectedCharacter.viewBox.width} ${selectedCharacter.viewBox.height}`}
-              preserveAspectRatio="xMidYMid meet"
-              style={{
-                width: '100%',
-                height: '100%',
-                cursor: isDragging ? 'grabbing' : 'grab'
-              }}
-              onMouseDown={(e) => {
-                setIsDragging(true);
-                setDragStart({
-                  x: e.clientX,
-                  y: e.clientY
-                });
-              }}
-              onMouseMove={(e) => {
-                if (isDragging) {
-                  const dx = (e.clientX - dragStart.x) * (selectedCharacter.viewBox.width / 300);
-                  const dy = (e.clientY - dragStart.y) * (selectedCharacter.viewBox.height / 300);
-                  
-                  setSelectedCharacter(prev => ({
-                    ...prev,
-                    viewBox: {
-                      ...prev.viewBox,
-                      x: prev.viewBox.x - dx,
-                      y: prev.viewBox.y - dy
-                    }
-                  }));
-                  
-                  setDragStart({
-                    x: e.clientX,
-                    y: e.clientY
-                  });
-                }
-              }}
-              onMouseUp={() => setIsDragging(false)}
-              onMouseLeave={() => setIsDragging(false)}
-              onTouchStart={(e) => {
-                const touch = e.touches[0];
-                setIsDragging(true);
-                setDragStart({
-                  x: touch.clientX,
-                  y: touch.clientY
-                });
-              }}
-              onTouchMove={(e) => {
-                if (isDragging) {
-                  const touch = e.touches[0];
-                  const dx = (touch.clientX - dragStart.x) * (selectedCharacter.viewBox.width / 300);
-                  const dy = (touch.clientY - dragStart.y) * (selectedCharacter.viewBox.height / 300);
-                  
-                  setSelectedCharacter(prev => ({
-                    ...prev,
-                    viewBox: {
-                      ...prev.viewBox,
-                      x: prev.viewBox.x - dx,
-                      y: prev.viewBox.y - dy
-                    }
-                  }));
-                  
-                  setDragStart({
-                    x: touch.clientX,
-                    y: touch.clientY
-                  });
-                }
-              }}
-              onTouchEnd={() => setIsDragging(false)}
-            >
-              <image
-                href={selectedCharacter.src}
-                width={selectedCharacter.width}
-                height={selectedCharacter.height}
-              />
-            </svg>
-          </div>
-          <div style={{ marginTop: '20px', textAlign: 'center' }}>
-            <div style={{ display: 'flex', gap: '10px', justifyContent: 'center' }}>
-              <button
-                style={{ padding: '8px 16px' }}
-                onClick={(e) => {
-                  if (!selectedCharacter) {
-                    return;
-                  }
-                  
-                  const newViewBoxY = selectedCharacter.viewBox.y - selectedCharacter.viewBox.height;
-                  setSelectedCharacter(prev => ({
-                    ...prev,
-                    viewBox: {
-                      ...prev.viewBox,
-                      y: newViewBoxY
-                    }
-                  }));
-                  
-                  setLastClickPosition(prev => ({
-                    x: prev.x,
-                    y: prev.y - charHeightRef.current
-                  }));
-                }}
-              >
-                上一个
-              </button>
-              <button
-                style={{ padding: '8px 16px' }}
-                onClick={(e) => {
-                  if (!selectedCharacter) {
-                    return;
-                  }
-                  
-                  const newViewBoxY = selectedCharacter.viewBox.y + selectedCharacter.viewBox.height;
-                  setSelectedCharacter(prev => ({
-                    ...prev,
-                    viewBox: {
-                      ...prev.viewBox,
-                      y: newViewBoxY
-                    }
-                  }));
-                  
-                  setLastClickPosition(prev => ({
-                    x: prev.x,
-                    y: prev.y + charHeightRef.current
-                  }));
-                }}
-              >
-                下一个
-              </button>
-            </div>
-            <div style={{ display: 'flex', gap: '10px', justifyContent: 'center', margin: '10px 0' }}>
-              {[selectedCharacter.viewBox.y - charHeightRef.current * 3,
-                selectedCharacter.viewBox.y - charHeightRef.current * 2,
-                selectedCharacter.viewBox.y - charHeightRef.current,
-                selectedCharacter.viewBox.y,
-                selectedCharacter.viewBox.y + charHeightRef.current,
-                selectedCharacter.viewBox.y + charHeightRef.current * 2,
-                selectedCharacter.viewBox.y + charHeightRef.current * 3].map((y, index) => (
-                <div 
-                  key={index} 
-                  style={{ 
-                    width: '50px', 
-                    height: '50px', 
-                    border: index === 3 ? '2px solid blue' : '1px solid #ccc', 
-                    overflow: 'hidden',
-                    cursor: 'pointer'
-                  }}
-                  onClick={() => {
-                    setSelectedCharacter(prev => ({
-                      ...prev,
-                      viewBox: {
-                        ...prev.viewBox,
-                        y: y
-                      }
-                    }));
-                    setLastClickPosition(prev => ({
-                      x: prev.x,
-                      y: y + charHeightRef.current / 2
-                    }));
-                  }}
-                >
-                  <svg
-                    viewBox={`${selectedCharacter.viewBox.x} ${y} ${selectedCharacter.viewBox.width} ${selectedCharacter.viewBox.height}`}
-                    preserveAspectRatio="xMidYMid meet"
-                    style={{ width: '100%', height: '100%' }}
-                  >
-                    <image
-                      href={selectedCharacter.src}
-                      width={selectedCharacter.width}
-                      height={selectedCharacter.height}
-                    />
-                  </svg>
-                </div>
-              ))}
-            </div>
-            <button 
-              style={{ marginTop: '10px', padding: '8px 16px' }}
-              onClick={() => setSelectedCharacter(null)}
-            >
-              返回完整图片
-            </button>
-          </div>
-        </div>
+        <CharacterSelector
+          selectedCharacter={selectedCharacter}
+          setSelectedCharacter={setSelectedCharacter}
+          charHeightRef={charHeightRef}
+        />
       )}
     </div>
   );
