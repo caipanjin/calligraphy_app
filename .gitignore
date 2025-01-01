@@ -1,0 +1,31 @@
+# 忽略 Node.js 模块
+node_modules/
+
+# 忽略虚拟环境
+venv/
+env/
+
+# 忽略编译输出
+dist/
+build/
+
+# 忽略临时文件和日志文件
+*.log
+*.tmp
+
+# 忽略 IDE 和编辑器配置文件
+.idea/
+.vscode/
+
+# 忽略测试报告和覆盖率报告
+coverage/
+reports/
+
+# 忽略 macOS 的 .DS_Store 文件
+.DS_Store
+
+# 忽略 Windows 的 Thumbs.db 文件
+Thumbs.db
+
+# 忽略特定的文件或目录
+ios/
