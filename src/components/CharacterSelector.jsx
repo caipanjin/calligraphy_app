@@ -107,13 +107,22 @@ const CharacterSelector = ({
                 return;
               }
               
-              const newViewBoxY = selectedCharacter.viewBox.y - selectedCharacter.viewBox.height;
-              // 检查是否超出图片顶部
-              if (newViewBoxY >= 0) {
+              let newViewBoxY = selectedCharacter.viewBox.y - selectedCharacter.viewBox.height;
+              let newViewBoxX = selectedCharacter.viewBox.x;
+              
+              // 如果超出顶部，切换到右边一列
+              if (newViewBoxY < 0) {
+                newViewBoxX += selectedCharacter.viewBox.width;
+                newViewBoxY = selectedCharacter.height - selectedCharacter.viewBox.height;
+              }
+              
+              // 检查是否超出图片范围
+              if (newViewBoxX < selectedCharacter.width && newViewBoxY >= 0) {
                 setSelectedCharacter(prev => ({
                   ...prev,
                   viewBox: {
                     ...prev.viewBox,
+                    x: newViewBoxX,
                     y: newViewBoxY
                   }
                 }));
@@ -129,13 +138,22 @@ const CharacterSelector = ({
                 return;
               }
               
-              const newViewBoxY = selectedCharacter.viewBox.y + selectedCharacter.viewBox.height;
-              // 检查是否超出图片高度
-              if (newViewBoxY < selectedCharacter.height) {
+              let newViewBoxY = selectedCharacter.viewBox.y + selectedCharacter.viewBox.height;
+              let newViewBoxX = selectedCharacter.viewBox.x;
+              
+              // 如果超出底部，切换到左边一列
+              if (newViewBoxY >= selectedCharacter.height) {
+                newViewBoxX -= selectedCharacter.viewBox.width;
+                newViewBoxY = 0;
+              }
+              
+              // 检查是否超出图片范围
+              if (newViewBoxX >= 0 && newViewBoxY < selectedCharacter.height) {
                 setSelectedCharacter(prev => ({
                   ...prev,
                   viewBox: {
                     ...prev.viewBox,
+                    x: newViewBoxX,
                     y: newViewBoxY
                   }
                 }));
