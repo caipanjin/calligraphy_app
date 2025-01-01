@@ -180,7 +180,7 @@ import './index.css'
                   width: '100%',
                   height: '100%',
                   cursor: 'crosshair',
-                  backgroundColor: 'rgba(255,0,0,0.3)'
+                  backgroundColor: 'rgba(255,255,255,0)'
                 }}
                 onClick={(e) => {
                   console.log('Overlay click event:', e)
