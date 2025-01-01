@@ -351,6 +351,51 @@ const App = () => {
                 下一个
               </button>
             </div>
+            <div style={{ display: 'flex', gap: '10px', justifyContent: 'center', margin: '10px 0' }}>
+              {[selectedCharacter.viewBox.y - charHeightRef.current * 3,
+                selectedCharacter.viewBox.y - charHeightRef.current * 2,
+                selectedCharacter.viewBox.y - charHeightRef.current,
+                selectedCharacter.viewBox.y,
+                selectedCharacter.viewBox.y + charHeightRef.current,
+                selectedCharacter.viewBox.y + charHeightRef.current * 2,
+                selectedCharacter.viewBox.y + charHeightRef.current * 3].map((y, index) => (
+                <div 
+                  key={index} 
+                  style={{ 
+                    width: '50px', 
+                    height: '50px', 
+                    border: index === 3 ? '2px solid blue' : '1px solid #ccc', 
+                    overflow: 'hidden',
+                    cursor: 'pointer'
+                  }}
+                  onClick={() => {
+                    setSelectedCharacter(prev => ({
+                      ...prev,
+                      viewBox: {
+                        ...prev.viewBox,
+                        y: y
+                      }
+                    }));
+                    setLastClickPosition(prev => ({
+                      x: prev.x,
+                      y: y + charHeightRef.current / 2
+                    }));
+                  }}
+                >
+                  <svg
+                    viewBox={`${selectedCharacter.viewBox.x} ${y} ${selectedCharacter.viewBox.width} ${selectedCharacter.viewBox.height}`}
+                    preserveAspectRatio="xMidYMid meet"
+                    style={{ width: '100%', height: '100%' }}
+                  >
+                    <image
+                      href={selectedCharacter.src}
+                      width={selectedCharacter.width}
+                      height={selectedCharacter.height}
+                    />
+                  </svg>
+                </div>
+              ))}
+            </div>
             <button 
               style={{ marginTop: '10px', padding: '8px 16px' }}
               onClick={() => setSelectedCharacter(null)}
