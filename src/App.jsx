@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Magnifier } from 'react-image-magnifiers';
 import './index.css';
 
@@ -12,115 +12,64 @@ const App = () => {
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   const charHeightRef = useRef(0);
-  // 同步recentImages状态和localStorage
   const [recentImages, setRecentImages] = useState(() => {
     try {
       const savedImages = localStorage.getItem('recentImages');
-      console.log('Loading recent images from localStorage:', savedImages);
       if (savedImages) {
-        const parsedImages = JSON.parse(savedImages);
-        console.log('Parsed recent images:', parsedImages);
-        return parsedImages;
+        return JSON.parse(savedImages);
       }
       return [];
     } catch (error) {
-      console.error('Error loading recent images:', error);
       return [];
     }
   });
 
   useEffect(() => {
-    // 当recentImages变化时更新localStorage
     try {
       localStorage.setItem('recentImages', JSON.stringify(recentImages));
-    } catch (error) {
-      console.error('Error saving recent images:', error);
-    }
+    } catch (error) {}
   }, [recentImages]);
+  
   const [showRecentImages, setShowRecentImages] = useState(false);
   const imageRef = useRef(null);
-
   const getImageRef = useCallback(() => imageRef.current, []);
-
-  useEffect(() => {
-    console.log('Image ref initialized:', getImageRef());
-  }, [getImageRef, image, selectedCharacter]);
 
   const handleImageUpload = async (e) => {
     const file = e.target.files[0];
     if (file) {
-      // 检查文件类型
       if (!file.type.startsWith('image/')) {
-        console.error('Invalid file type:', file.type);
         return;
       }
 
       const reader = new FileReader();
       reader.onload = async (e) => {
         try {
-          // 将base64数据转换为Blob
           const base64Data = e.target.result.split(',')[1];
           const blob = await fetch(`data:image/jpeg;base64,${base64Data}`)
             .then(res => res.blob());
           
-          // 生成临时URL
           const imageUrl = URL.createObjectURL(blob);
-          
-          // 更新当前图片
           setImage(imageUrl);
+          
           try {
             localStorage.setItem('recentImage', imageUrl);
-            console.log('Current image updated in state and localStorage');
           } catch (error) {
-            console.error('Error saving to localStorage:', error);
-            // 如果localStorage失败，只更新状态
             return;
           }
 
-          // 处理最近图片列表
-          const currentRecentImages = recentImages.filter(img => {
-            const isDuplicate = img === imageUrl;
-            if (isDuplicate) {
-              console.log('Found duplicate image, removing:', img);
-            }
-            return !isDuplicate;
-          });
-          console.log('Current recent images (after filtering duplicates):', currentRecentImages);
-          
+          const currentRecentImages = recentImages.filter(img => img !== imageUrl);
           const updatedImages = [imageUrl, ...currentRecentImages].slice(0, 3);
-          console.log('Updated recent images list:', updatedImages);
-
-          // 强制更新状态
-          setRecentImages(prev => {
-            console.log('Previous state:', prev);
-            return updatedImages;
-          });
-          console.log('Recent images state updated');
-
-          // 更新localStorage
+          setRecentImages(updatedImages);
+          
           try {
             localStorage.setItem('recentImages', JSON.stringify(updatedImages));
-            console.log('Recent images saved to localStorage');
-            // 验证存储是否成功
-            const storedImages = JSON.parse(localStorage.getItem('recentImages'));
-            console.log('Stored images verification:', storedImages);
-          } catch (error) {
-            console.error('Error saving to localStorage:', error);
-          }
+          } catch (error) {}
 
-          // 强制展开最近图片列表
           setShowRecentImages(true);
-          console.log('Recent images list expanded');
-        } catch (error) {
-          console.error('Error handling image upload:', error);
-        }
+        } catch (error) {}
       };
-      reader.onerror = (error) => {
-        console.error('Error reading file:', error);
-      };
+      reader.onerror = () => {};
       reader.readAsDataURL(file);
-    } else {
-      console.log('No file selected');
     }
   };
 
@@ -128,7 +77,6 @@ const App = () => {
     try {
       const currentImageRef = getImageRef();
       if (!image || !currentImageRef) {
-        console.log('No image loaded or image ref is null');
         return;
       }
 
@@ -136,36 +84,23 @@ const App = () => {
       const clickX = e.clientX - imgRect.left;
       const clickY = e.clientY - imgRect.top;
 
-      // 确保使用有效的图片尺寸
       const naturalWidth = currentImageRef.naturalWidth > 0 ? currentImageRef.naturalWidth : imgRect.width;
       const naturalHeight = currentImageRef.naturalHeight > 0 ? currentImageRef.naturalHeight : imgRect.height;
-
-      // 如果imgRect.height为0，使用naturalHeight
       const effectiveHeight = imgRect.height > 0 ? imgRect.height : naturalHeight;
       const effectiveWidth = imgRect.width > 0 ? imgRect.width : naturalWidth;
 
       const charAspectRatio = 1.1;
       const charWidth = effectiveWidth * 0.25;
       charHeightRef.current = charWidth * charAspectRatio;
-      // 确保字符高度不小于最小高度
       const minCharHeight = effectiveHeight * 0.1;
       if (charHeightRef.current < minCharHeight) {
         charHeightRef.current = minCharHeight;
       }
 
-      // 如果imgRect尺寸无效，直接返回
       if (effectiveWidth === 0 || effectiveHeight === 0) {
-        console.error('Invalid image dimensions:', { imgRect, naturalWidth, naturalHeight });
         return;
       }
 
-      const scale = imgRect.width / naturalWidth;
-
-      // 将屏幕坐标转换为原始图片坐标
-      if (imgRect.width === 0 || imgRect.height === 0) {
-        console.error('Invalid image dimensions:', imgRect);
-        return;
-      }
       const scaleX = naturalWidth / imgRect.width;
       const scaleY = naturalHeight / imgRect.height;
       const viewBoxX = (clickX - charWidth/2) * scaleX;
@@ -173,9 +108,7 @@ const App = () => {
       const viewBoxWidth = charWidth * scaleX;
       const viewBoxHeight = charHeightRef.current * scaleY;
 
-      // 确保viewBox值有效
       if (isNaN(viewBoxX) || isNaN(viewBoxY) || isNaN(viewBoxWidth) || isNaN(viewBoxHeight)) {
-        console.error('Invalid viewBox values:', { viewBoxX, viewBoxY, viewBoxWidth, viewBoxHeight });
         return;
       }
 
@@ -192,15 +125,12 @@ const App = () => {
       });
 
       setLastClickPosition({ x: clickX, y: clickY });
-
-    } catch (error) {
-      console.error('Error handling character click:', error);
-    }
+    } catch (error) {}
   };
 
   return (
     <div className="container">
-      <h1>Calligraphy App</h1>
+      <h2>书法临摹助手</h2>
       <div style={{ marginBottom: '20px' }}>
         <div style={{ marginBottom: '10px' }}>
           <div 
@@ -212,7 +142,7 @@ const App = () => {
             }}
             onClick={() => setShowRecentImages(!showRecentImages)}
           >
-            <h3 style={{ margin: 0 }}>最近打开的图片</h3>
+            <h3 style={{ margin: 0 }}>最近图片</h3>
             <span style={{ marginLeft: '10px' }}>
               {showRecentImages ? '▲' : '▼'}
             </span>
@@ -265,19 +195,19 @@ const App = () => {
           )}
         </div>
         
-          <div
-            style={{
-              position: 'absolute',
-              top: 0,
-              left: 0,
-              width: '100%',
-              height: '100%',
-              cursor: 'crosshair',
-              backgroundColor: 'rgba(255,255,255,0)',
-              zIndex: 1
-            }}
-            onClick={handleCharacterClick}
-          />
+        <div
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            width: '100%',
+            height: '100%',
+            cursor: 'crosshair',
+            backgroundColor: 'rgba(255,255,255,0)',
+            zIndex: 1
+          }}
+          onClick={handleCharacterClick}
+        />
       </div>
 
       {selectedCharacter && (
@@ -376,13 +306,10 @@ const App = () => {
                 style={{ padding: '8px 16px' }}
                 onClick={(e) => {
                   if (!selectedCharacter) {
-                    console.log('selectedCharacter is null');
                     return;
                   }
                   
-                  // 直接更新viewBox的y坐标，减少一个字符高度
                   const newViewBoxY = selectedCharacter.viewBox.y - selectedCharacter.viewBox.height;
-                  
                   setSelectedCharacter(prev => ({
                     ...prev,
                     viewBox: {
@@ -391,7 +318,6 @@ const App = () => {
                     }
                   }));
                   
-                  // 更新最后点击位置
                   setLastClickPosition(prev => ({
                     x: prev.x,
                     y: prev.y - charHeightRef.current
@@ -404,13 +330,10 @@ const App = () => {
                 style={{ padding: '8px 16px' }}
                 onClick={(e) => {
                   if (!selectedCharacter) {
-                    console.log('selectedCharacter is null');
                     return;
                   }
                   
-                  // 直接更新viewBox的y坐标，增加一个字符高度
                   const newViewBoxY = selectedCharacter.viewBox.y + selectedCharacter.viewBox.height;
-                  
                   setSelectedCharacter(prev => ({
                     ...prev,
                     viewBox: {
@@ -419,7 +342,6 @@ const App = () => {
                     }
                   }));
                   
-                  // 更新最后点击位置
                   setLastClickPosition(prev => ({
                     x: prev.x,
                     y: prev.y + charHeightRef.current
