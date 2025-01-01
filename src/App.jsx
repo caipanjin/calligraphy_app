@@ -45,20 +45,17 @@ const App = () => {
       reader.onload = async (e) => {
         try {
           const base64Data = e.target.result.split(',')[1];
-          const blob = await fetch(`data:image/jpeg;base64,${base64Data}`)
-            .then(res => res.blob());
-          
-          const imageUrl = URL.createObjectURL(blob);
-          setImage(imageUrl);
+          const imageData = `data:image/jpeg;base64,${base64Data}`;
+          setImage(imageData);
           
           try {
-            localStorage.setItem('recentImage', imageUrl);
+            localStorage.setItem('recentImage', imageData);
           } catch (error) {
             return;
           }
 
-          const currentRecentImages = recentImages.filter(img => img !== imageUrl);
-          const updatedImages = [imageUrl, ...currentRecentImages].slice(0, 3);
+          const currentRecentImages = recentImages.filter(img => img !== imageData);
+          const updatedImages = [imageData, ...currentRecentImages].slice(0, 3);
           setRecentImages(updatedImages);
           
           try {
