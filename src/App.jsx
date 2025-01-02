@@ -57,6 +57,50 @@ const App = () => {
     }
   }, [db]);
 
+  // 删除图片
+  const deleteImage = async (index) => {
+    // 先更新UI状态
+    const newImages = [...recentImages];
+    newImages.splice(index, 1);
+    // 确保数组中没有undefined或null值
+    const filteredImages = newImages.filter(img => img);
+    setRecentImages(filteredImages);
+
+    if (db) {
+      const transaction = db.transaction('images', 'readwrite');
+      const store = transaction.objectStore('images');
+      
+      // 删除对应的图片记录
+      store.delete(`recent_${index}`);
+      
+      // 如果还有图片，重新索引
+      if (filteredImages.length > 0) {
+        // 删除所有旧的recent_*记录
+        const clearRequest = store.getAllKeys();
+        clearRequest.onsuccess = () => {
+          clearRequest.result
+            .filter(key => key.startsWith('recent_'))
+            .forEach(key => store.delete(key));
+            
+          // 重新保存更新后的图片列表
+          filteredImages.forEach((url, newIndex) => {
+            if (url) { // 确保url存在
+              store.put({ id: `recent_${newIndex}`, url });
+            }
+          });
+        };
+      } else {
+        // 如果没有图片了，清除所有recent_*记录
+        const clearRequest = store.getAllKeys();
+        clearRequest.onsuccess = () => {
+          clearRequest.result
+            .filter(key => key.startsWith('recent_'))
+            .forEach(key => store.delete(key));
+        };
+      }
+    }
+  };
+
   // 自定义setImage，在设置图片时更新最近图片列表
   const setImageWithRecent = async (imageData) => {
     setImage(imageData);
@@ -222,6 +266,7 @@ const App = () => {
         setImage={setImageWithRecent}
         handleImageUpload={handleImageUpload}
         setSelectedCharacter={setSelectedCharacter}
+        deleteImage={deleteImage}
       />
 
       {/* 图片查看器组件 */}
