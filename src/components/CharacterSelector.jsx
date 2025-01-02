@@ -135,14 +135,34 @@ const CharacterSelector = ({
               
               // 检查是否超出图片范围
               if (newViewBoxX < selectedCharacter.width && newViewBoxY >= 0) {
-                setSelectedCharacter(prev => ({
-                  ...prev,
-                  viewBox: {
-                    ...prev.viewBox,
-                    x: newViewBoxX,
-                    y: newViewBoxY
+                // 如果目标字符不足显示，切换到下一列的第一个字符
+                if (selectedCharacter.width - newViewBoxX < selectedCharacter.viewBox.width / 2 ||
+                    selectedCharacter.height - newViewBoxY < selectedCharacter.viewBox.height / 2) {
+                  newViewBoxX += selectedCharacter.viewBox.width;
+                  newViewBoxY = 0;
+                  // 检查下一列的第一个字符是否满足条件
+                  if (newViewBoxX < selectedCharacter.width &&
+                      selectedCharacter.width - newViewBoxX >= selectedCharacter.viewBox.width / 2 &&
+                      selectedCharacter.height - newViewBoxY >= selectedCharacter.viewBox.height / 2) {
+                    setSelectedCharacter(prev => ({
+                      ...prev,
+                      viewBox: {
+                        ...prev.viewBox,
+                        x: newViewBoxX,
+                        y: newViewBoxY
+                      }
+                    }));
                   }
-                }));
+                } else {
+                  setSelectedCharacter(prev => ({
+                    ...prev,
+                    viewBox: {
+                      ...prev.viewBox,
+                      x: newViewBoxX,
+                      y: newViewBoxY
+                    }
+                  }));
+                }
               }
             }}
           >
@@ -167,14 +187,34 @@ const CharacterSelector = ({
               
               // 检查是否超出图片范围
               if (newViewBoxX >= 0 && newViewBoxY < selectedCharacter.height) {
-                setSelectedCharacter(prev => ({
-                  ...prev,
-                  viewBox: {
-                    ...prev.viewBox,
-                    x: newViewBoxX,
-                    y: newViewBoxY
+                // 如果目标字符不足显示，切换到上一列的最后一个字符
+                if (selectedCharacter.width - newViewBoxX < selectedCharacter.viewBox.width / 2 ||
+                    selectedCharacter.height - newViewBoxY < selectedCharacter.viewBox.height / 2) {
+                  newViewBoxX -= selectedCharacter.viewBox.width;
+                  newViewBoxY = 0;
+                  // 检查下一列的第一个字符是否满足条件
+                  if (newViewBoxX >= 0 &&
+                      selectedCharacter.width - newViewBoxX >= selectedCharacter.viewBox.width / 2 &&
+                      selectedCharacter.height - newViewBoxY >= selectedCharacter.viewBox.height / 2) {
+                    setSelectedCharacter(prev => ({
+                      ...prev,
+                      viewBox: {
+                        ...prev.viewBox,
+                        x: newViewBoxX,
+                        y: newViewBoxY
+                      }
+                    }));
                   }
-                }));
+                } else {
+                  setSelectedCharacter(prev => ({
+                    ...prev,
+                    viewBox: {
+                      ...prev.viewBox,
+                      x: newViewBoxX,
+                      y: newViewBoxY
+                    }
+                  }));
+                }
               }
             }}
           >
