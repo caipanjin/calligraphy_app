@@ -114,10 +114,10 @@ const CharacterSelector = ({
       </div>
       {/* 导航和控制区域 */}
       <div style={{ marginTop: '20px', textAlign: 'center' }}>
-        {/* 上一个/下一个按钮 */}
-        <div style={{ display: 'flex', gap: '10px', justifyContent: 'center' }}>
+        {/* 按钮容器 */}
+        <div style={{ display: 'flex', justifyContent: 'center', gap: '10px' }}>
           <button
-            style={{ padding: '8px 16px' }}
+            style={{ padding: '10px 20px' }}
             onClick={() => {
               if (!selectedCharacter) {
                 return;
@@ -149,7 +149,7 @@ const CharacterSelector = ({
             上一个
           </button>
           <button
-            style={{ padding: '8px 16px' }}
+            style={{ padding: '10px 20px' }}
             onClick={() => {
               if (!selectedCharacter) {
                 return;
@@ -181,69 +181,69 @@ const CharacterSelector = ({
             下一个
           </button>
           <button
-            style={{ padding: '8px', display: 'flex', alignItems: 'center' }}
-            onClick={() => {
-              if (!selectedCharacter) return;
-              setSelectedCharacter(prev => {
-                const scaleFactor = 1.1;
-                const newWidth = prev.viewBox.width / scaleFactor;
-                const newHeight = prev.viewBox.height / scaleFactor;
-                
-                // 计算字符在图片中的实际中心位置
-                const charCenterX = prev.viewBox.x + (prev.viewBox.width / 2);
-                const charCenterY = prev.viewBox.y + (prev.viewBox.height / 2);
-                
-                // 计算新的viewBox位置，使字符中心点保持不变
-                const newX = charCenterX - (newWidth / 2);
-                const newY = charCenterY - (newHeight / 2);
-                
-                return {
-                  ...prev,
-                  viewBox: {
-                    ...prev.viewBox,
-                    x: newX,
-                    y: newY,
-                    width: newWidth,
-                    height: newHeight
-                  }
-                };
-              });
-            }}
-          >
-            <FaSearchPlus />
-          </button>
-          <button
-            style={{ padding: '8px', display: 'flex', alignItems: 'center' }}
-            onClick={() => {
-              if (!selectedCharacter) return;
-              setSelectedCharacter(prev => {
-                const scaleFactor = 1.1;
-                const newWidth = prev.viewBox.width * scaleFactor;
-                const newHeight = prev.viewBox.height * scaleFactor;
-                
-                // 计算字符在图片中的实际中心位置
-                const charCenterX = prev.viewBox.x + (prev.viewBox.width / 2);
-                const charCenterY = prev.viewBox.y + (prev.viewBox.height / 2);
-                
-                // 计算新的viewBox位置，使字符中心点保持不变
-                const newX = charCenterX - (newWidth / 2);
-                const newY = charCenterY - (newHeight / 2);
-                
-                return {
-                  ...prev,
-                  viewBox: {
-                    ...prev.viewBox,
-                    x: newX,
-                    y: newY,
-                    width: newWidth,
-                    height: newHeight
-                  }
-                };
-              });
-            }}
-          >
-            <FaSearchMinus />
-          </button>
+            style={{ padding: '10px 20px', display: 'flex', alignItems: 'center', background: 'transparent', border: 'none' }}
+              onClick={() => {
+                if (!selectedCharacter) return;
+                setSelectedCharacter(prev => {
+                  const scaleFactor = 1.1;
+                  const newWidth = prev.viewBox.width / scaleFactor;
+                  const newHeight = prev.viewBox.height / scaleFactor;
+                  
+                  // 计算字符在图片中的实际中心位置
+                  const charCenterX = prev.viewBox.x + (prev.viewBox.width / 2);
+                  const charCenterY = prev.viewBox.y + (prev.viewBox.height / 2);
+                  
+                  // 计算新的viewBox位置，使字符中心点保持不变
+                  const newX = charCenterX - (newWidth / 2);
+                  const newY = charCenterY - (newHeight / 2);
+                  
+                  return {
+                    ...prev,
+                    viewBox: {
+                      ...prev.viewBox,
+                      x: newX,
+                      y: newY,
+                      width: newWidth,
+                      height: newHeight
+                    }
+                  };
+                });
+              }}
+            >
+              <FaSearchPlus />
+            </button>
+            <button
+              style={{ padding: '10px 20px', display: 'flex', alignItems: 'center', background: 'transparent', border: 'none' }}
+              onClick={() => {
+                if (!selectedCharacter) return;
+                setSelectedCharacter(prev => {
+                  const scaleFactor = 1.1;
+                  const newWidth = prev.viewBox.width * scaleFactor;
+                  const newHeight = prev.viewBox.height * scaleFactor;
+                  
+                  // 计算字符在图片中的实际中心位置
+                  const charCenterX = prev.viewBox.x + (prev.viewBox.width / 2);
+                  const charCenterY = prev.viewBox.y + (prev.viewBox.height / 2);
+                  
+                  // 计算新的viewBox位置，使字符中心点保持不变
+                  const newX = charCenterX - (newWidth / 2);
+                  const newY = charCenterY - (newHeight / 2);
+                  
+                  return {
+                    ...prev,
+                    viewBox: {
+                      ...prev.viewBox,
+                      x: newX,
+                      y: newY,
+                      width: newWidth,
+                      height: newHeight
+                    }
+                  };
+                });
+              }}
+            >
+              <FaSearchMinus />
+            </button>
         </div>
         
         {/* 字符预览缩略图 */}
