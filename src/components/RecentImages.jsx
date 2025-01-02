@@ -42,8 +42,8 @@ const RecentImages = ({ recentImages, image, setImage, handleImageUpload, setSel
                   src={img}
                   alt={`最近图片 ${index + 1}`}
                   style={{
-                    width: '100px',
-                    height: '100px',
+                    width: '55px',
+                    height: '55px',
                     objectFit: 'cover',
                     cursor: 'pointer',
                     border: image === img ? '2px solid blue' : '1px solid #ccc',

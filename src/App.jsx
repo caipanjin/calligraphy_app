@@ -75,8 +75,9 @@ const App = () => {
           .filter(img => img.id !== 'current')
           .map(img => img.url);
         
-        // 保留最多3张
-        const updatedImages = [imageData, ...images.filter(img => img !== imageData)].slice(0, 3);
+        // 如果图片已存在，保持原有顺序；如果不存在，添加到开头
+        const existingIndex = images.indexOf(imageData);
+        const updatedImages = existingIndex >= 0 ? images : [imageData, ...images].slice(0, 5);
         setRecentImages(updatedImages);
         
         // 保存最近图片列表
@@ -123,13 +124,6 @@ const App = () => {
     if (file) {
       // 检查文件类型是否为图片
       if (!file.type.startsWith('image/')) {
-        return;
-      }
-
-      // 检查文件大小，限制为5MB
-      const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
-      if (file.size > MAX_FILE_SIZE) {
-        alert('图片文件过大，请选择小于5MB的图片');
         return;
       }
 
