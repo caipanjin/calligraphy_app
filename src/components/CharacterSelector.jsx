@@ -1,6 +1,6 @@
 // 导入 React 核心库和状态钩子
 import React, { useState } from 'react';
-import { FaSearchPlus, FaSearchMinus } from 'react-icons/fa';
+import { FaSearchPlus, FaSearchMinus, FaChevronUp, FaChevronDown, FaChevronLeft } from 'react-icons/fa';
 
 /**
  * 字符选择器组件
@@ -117,7 +117,7 @@ const CharacterSelector = ({
         {/* 按钮容器 */}
         <div style={{ display: 'flex', justifyContent: 'center', gap: '10px' }}>
           <button
-            style={{ padding: '10px 20px' }}
+            style={{ padding: '10px 20px', display: 'flex', alignItems: 'center', background: 'transparent', border: 'none' }}
             onClick={() => {
               if (!selectedCharacter) {
                 return;
@@ -166,10 +166,10 @@ const CharacterSelector = ({
               }
             }}
           >
-            上一个
+            <FaChevronUp size={20} />
           </button>
           <button
-            style={{ padding: '10px 20px' }}
+            style={{ padding: '10px 20px', display: 'flex', alignItems: 'center', background: 'transparent', border: 'none' }}
             onClick={() => {
               if (!selectedCharacter) {
                 return;
@@ -218,7 +218,7 @@ const CharacterSelector = ({
               }
             }}
           >
-            下一个
+            <FaChevronDown size={20} />
           </button>
           <button
             style={{ padding: '10px 20px', display: 'flex', alignItems: 'center', background: 'transparent', border: 'none' }}
@@ -250,7 +250,7 @@ const CharacterSelector = ({
                 });
               }}
             >
-              <FaSearchPlus />
+              <FaSearchPlus size={20} />
             </button>
             <button
               style={{ padding: '10px 20px', display: 'flex', alignItems: 'center', background: 'transparent', border: 'none' }}
@@ -282,19 +282,23 @@ const CharacterSelector = ({
                 });
               }}
             >
-              <FaSearchMinus />
+              <FaSearchMinus size={20} />
             </button>
         </div>
         
         {/* 字符预览缩略图 */}
-        <div style={{ display: 'flex', gap: '10px', justifyContent: 'center', margin: '10px 0' }}>
-            {[selectedCharacter.viewBox.y - selectedCharacter.viewBox.height * 3,
-            selectedCharacter.viewBox.y - selectedCharacter.viewBox.height * 2,
+        <div style={{ 
+          display: 'flex', 
+          gap: '10px', 
+          justifyContent: 'center', 
+          margin: '10px 0',
+          alignItems: 'center'
+        }}>
+            {[selectedCharacter.viewBox.y - selectedCharacter.viewBox.height * 2,
             selectedCharacter.viewBox.y - selectedCharacter.viewBox.height,
             selectedCharacter.viewBox.y,
             selectedCharacter.viewBox.y + selectedCharacter.viewBox.height,
-            selectedCharacter.viewBox.y + selectedCharacter.viewBox.height * 2,
-            selectedCharacter.viewBox.y + selectedCharacter.viewBox.height * 3]
+            selectedCharacter.viewBox.y + selectedCharacter.viewBox.height * 2]
             .map((y, index) => {
               const charHeight = selectedCharacter.viewBox.height;
               const isVisible = y >= 0 && y < selectedCharacter.height && 
@@ -306,9 +310,14 @@ const CharacterSelector = ({
                     width: '50px', 
                     height: '50px', 
                     border: isVisible && y === selectedCharacter.viewBox.y ? '2px solid blue' : '1px solid #ccc', 
+                    borderRadius: '4px',
                     overflow: 'hidden',
                     cursor: isVisible ? 'pointer' : 'default',
-                    visibility: isVisible ? 'visible' : 'hidden'
+                    visibility: isVisible ? 'visible' : 'hidden',
+                    boxSizing: 'border-box',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center'
                   }}
                   onClick={() => {
                     if (isVisible) {
@@ -322,10 +331,14 @@ const CharacterSelector = ({
                     }
                   }}
                 >
-                  <svg
+                    <svg
                     viewBox={`${selectedCharacter.viewBox.x} ${y} ${selectedCharacter.viewBox.width} ${selectedCharacter.viewBox.height}`}
                     preserveAspectRatio="xMidYMid meet"
-                    style={{ width: '100%', height: '100%' }}
+                    style={{ 
+                      width: '100%', 
+                      height: '100%',
+                      objectFit: 'contain'
+                    }}
                   >
                     <image
                       href={selectedCharacter.src}
@@ -340,9 +353,18 @@ const CharacterSelector = ({
         
         {/* 返回完整图片按钮 */}
         <button 
-          style={{ marginTop: '10px', padding: '8px 16px' }}
+          style={{ 
+            marginTop: '10px', 
+            padding: '8px 16px', 
+            border: 'none',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'flex-start',
+            background: 'transparent'
+          }}
           onClick={() => setSelectedCharacter(null)}
         >
+          <FaChevronLeft style={{ marginRight: '8px' }} />
           返回完整图片
         </button>
       </div>

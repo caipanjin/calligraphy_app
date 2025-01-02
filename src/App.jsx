@@ -178,6 +178,8 @@ const App = () => {
           const base64Data = e.target.result.split(',')[1];
           const imageData = `data:image/jpeg;base64,${base64Data}`;
           setImageWithRecent(imageData);
+          // 如果当前处于字符放大状态，返回完整图片
+          setSelectedCharacter(null);
         } catch (error) {
           alert('图片处理失败，请尝试其他图片');
         }
