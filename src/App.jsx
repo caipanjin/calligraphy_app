@@ -10,11 +10,85 @@ import ImageViewer from './components/ImageViewer';
 import CharacterSelector from './components/CharacterSelector';
 
 const App = () => {
-  // 当前显示的图片数据URL，从localStorage初始化
-  const [image, setImage] = useState(() => {
-    const savedImage = localStorage.getItem('recentImage');
-    return savedImage ? savedImage : null;
-  });
+  // 初始化IndexedDB
+  const [db, setDb] = useState(null);
+
+  useEffect(() => {
+    const request = indexedDB.open('calligraphyImages', 1);
+    
+    request.onupgradeneeded = (event) => {
+      const db = event.target.result;
+      if (!db.objectStoreNames.contains('images')) {
+        db.createObjectStore('images', { keyPath: 'id' });
+      }
+    };
+
+    request.onsuccess = (event) => {
+      setDb(event.target.result);
+    };
+
+    request.onerror = (event) => {
+      console.error('IndexedDB error:', event.target.error);
+    };
+  }, []);
+
+  // 当前显示的图片数据URL，从IndexedDB初始化
+  const [image, setImage] = useState(null);
+
+  useEffect(() => {
+    if (db) {
+      const transaction = db.transaction('images', 'readonly');
+      const store = transaction.objectStore('images');
+      const request = store.get('current');
+      
+      request.onsuccess = () => {
+        if (request.result) {
+          setImage(request.result.url);
+          // 更新最近图片列表
+          const recentRequest = store.getAll();
+          recentRequest.onsuccess = () => {
+            const images = recentRequest.result
+              .filter(img => img.id !== 'current')
+              .map(img => img.url);
+            setRecentImages(images);
+          };
+        }
+      };
+    }
+  }, [db]);
+
+  // 自定义setImage，在设置图片时更新最近图片列表
+  const setImageWithRecent = async (imageData) => {
+    setImage(imageData);
+    
+    if (db) {
+      const transaction = db.transaction('images', 'readwrite');
+      const store = transaction.objectStore('images');
+      
+      // 保存当前图片
+      store.put({ id: 'current', url: imageData });
+      
+      // 更新最近图片列表
+      const recentRequest = store.getAll();
+      recentRequest.onsuccess = () => {
+        const images = recentRequest.result
+          .filter(img => img.id !== 'current')
+          .map(img => img.url);
+        
+        // 保留最多3张
+        const updatedImages = [imageData, ...images.filter(img => img !== imageData)].slice(0, 3);
+        setRecentImages(updatedImages);
+        
+        // 保存最近图片列表
+        updatedImages.forEach((url, index) => {
+          store.put({ id: `recent_${index}`, url });
+        });
+      };
+    }
+
+    // 显示最近图片列表
+    setShowRecentImages(true);
+  };
   
   // 当前选中的字符信息
   const [selectedCharacter, setSelectedCharacter] = useState(null);
@@ -31,25 +105,8 @@ const App = () => {
   // 字符高度引用，用于跨组件共享
   const charHeightRef = useRef(0);
   
-  // 最近查看的图片列表，从localStorage初始化
-  const [recentImages, setRecentImages] = useState(() => {
-    try {
-      const savedImages = localStorage.getItem('recentImages');
-      if (savedImages) {
-        return JSON.parse(savedImages);
-      }
-      return [];
-    } catch (error) {
-      return [];
-    }
-  });
-
-  // 当recentImages变化时，自动保存到localStorage
-  useEffect(() => {
-    try {
-      localStorage.setItem('recentImages', JSON.stringify(recentImages));
-    } catch (error) {}
-  }, [recentImages]);
+  // 最近查看的图片列表
+  const [recentImages, setRecentImages] = useState([]);
   
   // 是否显示最近图片列表
   const [showRecentImages, setShowRecentImages] = useState(false);
@@ -69,36 +126,27 @@ const App = () => {
         return;
       }
 
+      // 检查文件大小，限制为5MB
+      const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
+      if (file.size > MAX_FILE_SIZE) {
+        alert('图片文件过大，请选择小于5MB的图片');
+        return;
+      }
+
       const reader = new FileReader();
       reader.onload = async (e) => {
         try {
           // 将图片转换为base64格式
           const base64Data = e.target.result.split(',')[1];
           const imageData = `data:image/jpeg;base64,${base64Data}`;
-          setImage(imageData);
-          
-          // 保存当前图片到localStorage
-          try {
-            localStorage.setItem('recentImage', imageData);
-          } catch (error) {
-            return;
-          }
-
-          // 更新最近图片列表，保留最多3张
-          const currentRecentImages = recentImages.filter(img => img !== imageData);
-          const updatedImages = [imageData, ...currentRecentImages].slice(0, 3);
-          setRecentImages(updatedImages);
-          
-          // 保存更新后的最近图片列表到localStorage
-          try {
-            localStorage.setItem('recentImages', JSON.stringify(updatedImages));
-          } catch (error) {}
-
-          // 显示最近图片列表
-          setShowRecentImages(true);
-        } catch (error) {}
+          setImageWithRecent(imageData);
+        } catch (error) {
+          alert('图片处理失败，请尝试其他图片');
+        }
       };
-      reader.onerror = () => {};
+      reader.onerror = () => {
+        alert('图片读取失败，请重试');
+      };
       reader.readAsDataURL(file);
     }
   };
@@ -177,7 +225,7 @@ const App = () => {
       <RecentImages 
         recentImages={recentImages}
         image={image}
-        setImage={setImage}
+        setImage={setImageWithRecent}
         handleImageUpload={handleImageUpload}
         setSelectedCharacter={setSelectedCharacter}
       />
