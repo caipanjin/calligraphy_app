@@ -184,15 +184,30 @@ const CharacterSelector = ({
             style={{ padding: '8px', display: 'flex', alignItems: 'center' }}
             onClick={() => {
               if (!selectedCharacter) return;
-              const scaleFactor = 1.1;
-              setSelectedCharacter(prev => ({
-                ...prev,
-                viewBox: {
-                  ...prev.viewBox,
-                  width: prev.viewBox.width / scaleFactor,
-                  height: prev.viewBox.height / scaleFactor
-                }
-              }));
+              setSelectedCharacter(prev => {
+                const scaleFactor = 1.1;
+                const newWidth = prev.viewBox.width / scaleFactor;
+                const newHeight = prev.viewBox.height / scaleFactor;
+                
+                // 计算字符在图片中的实际中心位置
+                const charCenterX = prev.viewBox.x + (prev.viewBox.width / 2);
+                const charCenterY = prev.viewBox.y + (prev.viewBox.height / 2);
+                
+                // 计算新的viewBox位置，使字符中心点保持不变
+                const newX = charCenterX - (newWidth / 2);
+                const newY = charCenterY - (newHeight / 2);
+                
+                return {
+                  ...prev,
+                  viewBox: {
+                    ...prev.viewBox,
+                    x: newX,
+                    y: newY,
+                    width: newWidth,
+                    height: newHeight
+                  }
+                };
+              });
             }}
           >
             <FaSearchPlus />
@@ -201,15 +216,30 @@ const CharacterSelector = ({
             style={{ padding: '8px', display: 'flex', alignItems: 'center' }}
             onClick={() => {
               if (!selectedCharacter) return;
-              const scaleFactor = 1.1;
-              setSelectedCharacter(prev => ({
-                ...prev,
-                viewBox: {
-                  ...prev.viewBox,
-                  width: prev.viewBox.width * scaleFactor,
-                  height: prev.viewBox.height * scaleFactor
-                }
-              }));
+              setSelectedCharacter(prev => {
+                const scaleFactor = 1.1;
+                const newWidth = prev.viewBox.width * scaleFactor;
+                const newHeight = prev.viewBox.height * scaleFactor;
+                
+                // 计算字符在图片中的实际中心位置
+                const charCenterX = prev.viewBox.x + (prev.viewBox.width / 2);
+                const charCenterY = prev.viewBox.y + (prev.viewBox.height / 2);
+                
+                // 计算新的viewBox位置，使字符中心点保持不变
+                const newX = charCenterX - (newWidth / 2);
+                const newY = charCenterY - (newHeight / 2);
+                
+                return {
+                  ...prev,
+                  viewBox: {
+                    ...prev.viewBox,
+                    x: newX,
+                    y: newY,
+                    width: newWidth,
+                    height: newHeight
+                  }
+                };
+              });
             }}
           >
             <FaSearchMinus />
@@ -218,13 +248,13 @@ const CharacterSelector = ({
         
         {/* 字符预览缩略图 */}
         <div style={{ display: 'flex', gap: '10px', justifyContent: 'center', margin: '10px 0' }}>
-          {[selectedCharacter.viewBox.y - charHeightRef.current * 3,
-            selectedCharacter.viewBox.y - charHeightRef.current * 2,
-            selectedCharacter.viewBox.y - charHeightRef.current,
+            {[selectedCharacter.viewBox.y - selectedCharacter.viewBox.height * 3,
+            selectedCharacter.viewBox.y - selectedCharacter.viewBox.height * 2,
+            selectedCharacter.viewBox.y - selectedCharacter.viewBox.height,
             selectedCharacter.viewBox.y,
-            selectedCharacter.viewBox.y + charHeightRef.current,
-            selectedCharacter.viewBox.y + charHeightRef.current * 2,
-            selectedCharacter.viewBox.y + charHeightRef.current * 3]
+            selectedCharacter.viewBox.y + selectedCharacter.viewBox.height,
+            selectedCharacter.viewBox.y + selectedCharacter.viewBox.height * 2,
+            selectedCharacter.viewBox.y + selectedCharacter.viewBox.height * 3]
             .map((y, index) => {
               const charHeight = selectedCharacter.viewBox.height;
               const isVisible = y >= 0 && y < selectedCharacter.height && 
