@@ -1,15 +1,25 @@
+// 导入 React 核心库和状态钩子
 import React, { useState } from 'react';
 
+/**
+ * 字符选择器组件
+ * @param {Object} selectedCharacter - 当前选中的字符信息
+ * @param {function} setSelectedCharacter - 设置选中字符的回调函数
+ * @param {React.RefObject} charHeightRef - 字符高度的引用
+ */
 const CharacterSelector = ({ 
   selectedCharacter, 
   setSelectedCharacter,
   charHeightRef
 }) => {
+  // 是否正在拖动视图
   const [isDragging, setIsDragging] = useState(false);
+  // 拖动开始的位置
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
 
   return (
     <div style={{ marginTop: '20px' }}>
+      {/* 字符查看容器 */}
       <div 
         style={{ 
           display: 'flex',
@@ -23,6 +33,7 @@ const CharacterSelector = ({
           overflow: 'hidden'
         }}
       >
+        {/* SVG 视图，支持拖动操作 */}
         <svg
           viewBox={`${selectedCharacter.viewBox.x} ${selectedCharacter.viewBox.y} ${selectedCharacter.viewBox.width} ${selectedCharacter.viewBox.height}`}
           preserveAspectRatio="xMidYMid meet"
@@ -40,6 +51,7 @@ const CharacterSelector = ({
           }}
           onMouseMove={(e) => {
             if (isDragging) {
+              // 计算拖动距离并更新视图位置
               const dx = (e.clientX - dragStart.x) * (selectedCharacter.viewBox.width / 300);
               const dy = (e.clientY - dragStart.y) * (selectedCharacter.viewBox.height / 300);
               
@@ -91,6 +103,7 @@ const CharacterSelector = ({
           }}
           onTouchEnd={() => setIsDragging(false)}
         >
+          {/* 显示选中的字符图片 */}
           <image
             href={selectedCharacter.src}
             width={selectedCharacter.width}
@@ -98,7 +111,9 @@ const CharacterSelector = ({
           />
         </svg>
       </div>
+      {/* 导航和控制区域 */}
       <div style={{ marginTop: '20px', textAlign: 'center' }}>
+        {/* 上一个/下一个按钮 */}
         <div style={{ display: 'flex', gap: '10px', justifyContent: 'center' }}>
           <button
             style={{ padding: '8px 16px' }}
@@ -107,6 +122,7 @@ const CharacterSelector = ({
                 return;
               }
               
+              // 计算上一个字符的位置
               let newViewBoxY = selectedCharacter.viewBox.y - selectedCharacter.viewBox.height;
               let newViewBoxX = selectedCharacter.viewBox.x;
               
@@ -138,6 +154,7 @@ const CharacterSelector = ({
                 return;
               }
               
+              // 计算下一个字符的位置
               let newViewBoxY = selectedCharacter.viewBox.y + selectedCharacter.viewBox.height;
               let newViewBoxX = selectedCharacter.viewBox.x;
               
@@ -163,6 +180,8 @@ const CharacterSelector = ({
             下一个
           </button>
         </div>
+        
+        {/* 字符预览缩略图 */}
         <div style={{ display: 'flex', gap: '10px', justifyContent: 'center', margin: '10px 0' }}>
           {[selectedCharacter.viewBox.y - charHeightRef.current * 3,
             selectedCharacter.viewBox.y - charHeightRef.current * 2,
@@ -172,7 +191,9 @@ const CharacterSelector = ({
             selectedCharacter.viewBox.y + charHeightRef.current * 2,
             selectedCharacter.viewBox.y + charHeightRef.current * 3]
             .map((y, index) => {
-              const isVisible = y >= 0 && y < selectedCharacter.height;
+              const charHeight = selectedCharacter.viewBox.height;
+              const isVisible = y >= 0 && y < selectedCharacter.height && 
+                (selectedCharacter.height - y) >= charHeight / 2;
               return (
                 <div 
                   key={index} 
@@ -211,6 +232,8 @@ const CharacterSelector = ({
               );
             })}
         </div>
+        
+        {/* 返回完整图片按钮 */}
         <button 
           style={{ marginTop: '10px', padding: '8px 16px' }}
           onClick={() => setSelectedCharacter(null)}
