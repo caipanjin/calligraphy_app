@@ -301,8 +301,12 @@ const CharacterSelector = ({
             selectedCharacter.viewBox.y + selectedCharacter.viewBox.height * 2]
             .map((y, index) => {
               const charHeight = selectedCharacter.viewBox.height;
-              const isVisible = y >= 0 && y < selectedCharacter.height && 
-                (selectedCharacter.height - y) >= charHeight / 2;
+              const isVisible = y + charHeight <= selectedCharacter.height && 
+                y >= 0 &&
+                selectedCharacter.viewBox.x + selectedCharacter.viewBox.width <= selectedCharacter.width &&
+                selectedCharacter.viewBox.x >= 0 &&
+                (selectedCharacter.height - y) >= charHeight &&
+                (selectedCharacter.width - selectedCharacter.viewBox.x) >= selectedCharacter.viewBox.width;
               return (
                 <div 
                   key={index} 
