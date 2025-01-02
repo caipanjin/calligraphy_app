@@ -1,5 +1,6 @@
 // 导入 React 核心库和状态钩子
 import React, { useState } from 'react';
+import { FaSearchPlus, FaSearchMinus } from 'react-icons/fa';
 
 /**
  * 字符选择器组件
@@ -178,6 +179,40 @@ const CharacterSelector = ({
             }}
           >
             下一个
+          </button>
+          <button
+            style={{ padding: '8px', display: 'flex', alignItems: 'center' }}
+            onClick={() => {
+              if (!selectedCharacter) return;
+              const scaleFactor = 1.1;
+              setSelectedCharacter(prev => ({
+                ...prev,
+                viewBox: {
+                  ...prev.viewBox,
+                  width: prev.viewBox.width / scaleFactor,
+                  height: prev.viewBox.height / scaleFactor
+                }
+              }));
+            }}
+          >
+            <FaSearchPlus />
+          </button>
+          <button
+            style={{ padding: '8px', display: 'flex', alignItems: 'center' }}
+            onClick={() => {
+              if (!selectedCharacter) return;
+              const scaleFactor = 1.1;
+              setSelectedCharacter(prev => ({
+                ...prev,
+                viewBox: {
+                  ...prev.viewBox,
+                  width: prev.viewBox.width * scaleFactor,
+                  height: prev.viewBox.height * scaleFactor
+                }
+              }));
+            }}
+          >
+            <FaSearchMinus />
           </button>
         </div>
         
