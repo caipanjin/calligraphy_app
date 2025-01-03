@@ -343,12 +343,46 @@ const CharacterSelector = ({
           margin: '10px 0',
           alignItems: 'center'
         }}>
-            {[selectedCharacter.viewBox.y - selectedCharacter.viewBox.height * 2,
-            selectedCharacter.viewBox.y - selectedCharacter.viewBox.height,
-            selectedCharacter.viewBox.y,
-            selectedCharacter.viewBox.y + selectedCharacter.viewBox.height,
-            selectedCharacter.viewBox.y + selectedCharacter.viewBox.height * 2]
-            .map((y, index) => {
+            {[
+              getPreviousCharacterPosition(
+                selectedCharacter.viewBox.x,
+                selectedCharacter.viewBox.y,
+                selectedCharacter.viewBox.width,
+                selectedCharacter.viewBox.height,
+                selectedCharacter.width,
+                selectedCharacter.height,
+                2
+              ),
+              getPreviousCharacterPosition(
+                selectedCharacter.viewBox.x,
+                selectedCharacter.viewBox.y,
+                selectedCharacter.viewBox.width,
+                selectedCharacter.viewBox.height,
+                selectedCharacter.width,
+                selectedCharacter.height,
+                1
+              ),
+              {x: selectedCharacter.viewBox.x, y: selectedCharacter.viewBox.y},
+              getNextCharacterPosition(
+                selectedCharacter.viewBox.x,
+                selectedCharacter.viewBox.y,
+                selectedCharacter.viewBox.width,
+                selectedCharacter.viewBox.height,
+                selectedCharacter.width,
+                selectedCharacter.height,
+                1
+              ),
+              getNextCharacterPosition(
+                selectedCharacter.viewBox.x,
+                selectedCharacter.viewBox.y,
+                selectedCharacter.viewBox.width,
+                selectedCharacter.viewBox.height,
+                selectedCharacter.width,
+                selectedCharacter.height,
+                2
+              )
+            ]
+            .map((pos, index) => {
               const charHeight = selectedCharacter.viewBox.height;
               const isVisible = true;
               return (
@@ -357,7 +391,7 @@ const CharacterSelector = ({
                   style={{ 
                     width: '50px', 
                     height: '50px', 
-                    border: isVisible && y === selectedCharacter.viewBox.y ? '2px solid blue' : '1px solid #ccc', 
+                    border: isVisible && pos.y === selectedCharacter.viewBox.y ? '2px solid blue' : '1px solid #ccc', 
                     borderRadius: '4px',
                     overflow: 'hidden',
                     cursor: isVisible ? 'pointer' : 'default',
@@ -373,14 +407,15 @@ const CharacterSelector = ({
                         ...prev,
                         viewBox: {
                           ...prev.viewBox,
-                          y: y
+                          x: pos.x,
+                          y: pos.y
                         }
                       }));
                     }
                   }}
                 >
                     <svg
-                    viewBox={`${selectedCharacter.viewBox.x} ${y} ${selectedCharacter.viewBox.width} ${selectedCharacter.viewBox.height}`}
+                    viewBox={`${pos.x} ${pos.y} ${selectedCharacter.viewBox.width} ${selectedCharacter.viewBox.height}`}
                     preserveAspectRatio="xMidYMid meet"
                     style={{ 
                       width: '100%', 
