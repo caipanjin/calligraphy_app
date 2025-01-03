@@ -23,17 +23,18 @@ const CharacterSelector = ({
    * 计算下n个字符的位置
    * @param {number} currentX - 当前字符的x坐标
    * @param {number} currentY - 当前字符的y坐标 
-   * @param {number} charWidth - 字符宽度
-   * @param {number} charHeight - 字符高度
-   * @param {number} imageWidth - 图片总宽度
-   * @param {number} imageHeight - 图片总高度
    * @param {number} step - 要跳过的字符数，默认为1
    * @returns {Object} 下n个字符的坐标 {x, y}
    */
-  const getNextCharacterPosition = (currentX, currentY, charWidth, charHeight, imageWidth, imageHeight, step = 1) => {
+  const getNextCharacterPosition = (currentX, currentY, step = 1) => {
     if (step <= 0) {
       return { x: currentX, y: currentY };
     }
+    
+    const charWidth = selectedCharacter.viewBox.width;
+    const charHeight = selectedCharacter.viewBox.height;
+    const imageWidth = selectedCharacter.width;
+    const imageHeight = selectedCharacter.height;
     
     let newY = currentY + charHeight;
     let newX = currentX;
@@ -55,10 +56,10 @@ const CharacterSelector = ({
         if (newX >= 0 &&
             imageWidth - newX >= charWidth / 2 &&
             imageHeight - newY >= charHeight / 2) {
-          return getNextCharacterPosition(newX, newY, charWidth, charHeight, imageWidth, imageHeight, step - 1);
+          return getNextCharacterPosition(newX, newY, step - 1);
         }
       } else {
-        return getNextCharacterPosition(newX, newY, charWidth, charHeight, imageWidth, imageHeight, step - 1);
+        return getNextCharacterPosition(newX, newY, step - 1);
       }
     }
     
@@ -70,17 +71,18 @@ const CharacterSelector = ({
    * 计算上n个字符的位置
    * @param {number} currentX - 当前字符的x坐标
    * @param {number} currentY - 当前字符的y坐标 
-   * @param {number} charWidth - 字符宽度
-   * @param {number} charHeight - 字符高度
-   * @param {number} imageWidth - 图片总宽度
-   * @param {number} imageHeight - 图片总高度
    * @param {number} step - 要跳过的字符数，默认为1
    * @returns {Object} 上n个字符的坐标 {x, y}
    */
-  const getPreviousCharacterPosition = (currentX, currentY, charWidth, charHeight, imageWidth, imageHeight, step = 1) => {
+  const getPreviousCharacterPosition = (currentX, currentY, step = 1) => {
     if (step <= 0) {
       return { x: currentX, y: currentY };
     }
+    
+    const charWidth = selectedCharacter.viewBox.width;
+    const charHeight = selectedCharacter.viewBox.height;
+    const imageWidth = selectedCharacter.width;
+    const imageHeight = selectedCharacter.height;
     
     let newY = currentY - charHeight;
     let newX = currentX;
@@ -102,10 +104,10 @@ const CharacterSelector = ({
         if (newX < imageWidth &&
             imageWidth - newX >= charWidth / 2 &&
             imageHeight - newY >= charHeight / 2) {
-          return getPreviousCharacterPosition(newX, newY, charWidth, charHeight, imageWidth, imageHeight, step - 1);
+          return getPreviousCharacterPosition(newX, newY, step - 1);
         }
       } else {
-        return getPreviousCharacterPosition(newX, newY, charWidth, charHeight, imageWidth, imageHeight, step - 1);
+        return getPreviousCharacterPosition(newX, newY, step - 1);
       }
     }
     
@@ -221,10 +223,6 @@ const CharacterSelector = ({
               const { x, y } = getPreviousCharacterPosition(
                 selectedCharacter.viewBox.x,
                 selectedCharacter.viewBox.y,
-                selectedCharacter.viewBox.width,
-                selectedCharacter.viewBox.height,
-                selectedCharacter.width,
-                selectedCharacter.height,
                 1 // 默认跳转1个字符
               );
               
@@ -250,10 +248,6 @@ const CharacterSelector = ({
               const { x, y } = getNextCharacterPosition(
                 selectedCharacter.viewBox.x,
                 selectedCharacter.viewBox.y,
-                selectedCharacter.viewBox.width,
-                selectedCharacter.viewBox.height,
-                selectedCharacter.width,
-                selectedCharacter.height,
                 1 // 默认跳转1个字符
               );
               
@@ -347,38 +341,22 @@ const CharacterSelector = ({
               getPreviousCharacterPosition(
                 selectedCharacter.viewBox.x,
                 selectedCharacter.viewBox.y,
-                selectedCharacter.viewBox.width,
-                selectedCharacter.viewBox.height,
-                selectedCharacter.width,
-                selectedCharacter.height,
                 2
               ),
               getPreviousCharacterPosition(
                 selectedCharacter.viewBox.x,
                 selectedCharacter.viewBox.y,
-                selectedCharacter.viewBox.width,
-                selectedCharacter.viewBox.height,
-                selectedCharacter.width,
-                selectedCharacter.height,
                 1
               ),
               {x: selectedCharacter.viewBox.x, y: selectedCharacter.viewBox.y},
               getNextCharacterPosition(
                 selectedCharacter.viewBox.x,
                 selectedCharacter.viewBox.y,
-                selectedCharacter.viewBox.width,
-                selectedCharacter.viewBox.height,
-                selectedCharacter.width,
-                selectedCharacter.height,
                 1
               ),
               getNextCharacterPosition(
                 selectedCharacter.viewBox.x,
                 selectedCharacter.viewBox.y,
-                selectedCharacter.viewBox.width,
-                selectedCharacter.viewBox.height,
-                selectedCharacter.width,
-                selectedCharacter.height,
                 2
               )
             ]
