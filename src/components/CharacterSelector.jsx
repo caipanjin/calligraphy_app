@@ -63,8 +63,8 @@ const CharacterSelector = ({
       }
     }
     
-    // 如果超出范围，返回原位置
-    return { x: currentX, y: currentY };
+    // 如果超出范围，返回特殊值表示不显示
+    return { x: -1, y: -1 };
   };
 
   /**
@@ -111,8 +111,8 @@ const CharacterSelector = ({
       }
     }
     
-    // 如果超出范围，返回原位置
-    return { x: currentX, y: currentY };
+    // 如果超出范围，返回特殊值表示不显示
+    return { x: -1, y: -1 };
   };
 
   return (
@@ -220,20 +220,22 @@ const CharacterSelector = ({
                 return;
               }
               
-              const { x, y } = getPreviousCharacterPosition(
+              const prevPos = getPreviousCharacterPosition(
                 selectedCharacter.viewBox.x,
                 selectedCharacter.viewBox.y,
                 1 // 默认跳转1个字符
               );
               
-              setSelectedCharacter(prev => ({
-                ...prev,
-                viewBox: {
-                  ...prev.viewBox,
-                  x,
-                  y
-                }
-              }));
+              if (prevPos.x !== -1 && prevPos.y !== -1) {
+                setSelectedCharacter(prev => ({
+                  ...prev,
+                  viewBox: {
+                    ...prev.viewBox,
+                    x: prevPos.x,
+                    y: prevPos.y
+                  }
+                }));
+              }
             }}
           >
             <FaChevronUp size={20} />
@@ -245,20 +247,22 @@ const CharacterSelector = ({
                 return;
               }
               
-              const { x, y } = getNextCharacterPosition(
+              const nextPos = getNextCharacterPosition(
                 selectedCharacter.viewBox.x,
                 selectedCharacter.viewBox.y,
                 1 // 默认跳转1个字符
               );
               
-              setSelectedCharacter(prev => ({
-                ...prev,
-                viewBox: {
-                  ...prev.viewBox,
-                  x,
-                  y
-                }
-              }));
+              if (nextPos.x !== -1 && nextPos.y !== -1) {
+                setSelectedCharacter(prev => ({
+                  ...prev,
+                  viewBox: {
+                    ...prev.viewBox,
+                    x: nextPos.x,
+                    y: nextPos.y
+                  }
+                }));
+              }
             }}
           >
             <FaChevronDown size={20} />
@@ -362,7 +366,7 @@ const CharacterSelector = ({
             ]
             .map((pos, index) => {
               const charHeight = selectedCharacter.viewBox.height;
-              const isVisible = true;
+              const isVisible = pos.x !== -1 && pos.y !== -1;
               return (
                 <div 
                   key={index} 
