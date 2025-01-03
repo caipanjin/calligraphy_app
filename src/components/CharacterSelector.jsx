@@ -18,6 +18,101 @@ const CharacterSelector = ({
   // 拖动开始的位置
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
 
+  
+  /**
+   * 计算下n个字符的位置
+   * @param {number} currentX - 当前字符的x坐标
+   * @param {number} currentY - 当前字符的y坐标 
+   * @param {number} charWidth - 字符宽度
+   * @param {number} charHeight - 字符高度
+   * @param {number} imageWidth - 图片总宽度
+   * @param {number} imageHeight - 图片总高度
+   * @param {number} step - 要跳过的字符数，默认为1
+   * @returns {Object} 下n个字符的坐标 {x, y}
+   */
+  const getNextCharacterPosition = (currentX, currentY, charWidth, charHeight, imageWidth, imageHeight, step = 1) => {
+    if (step <= 0) {
+      return { x: currentX, y: currentY };
+    }
+    
+    let newY = currentY + charHeight;
+    let newX = currentX;
+    
+    // 如果超出底部，切换到左边一列
+    if (newY >= imageHeight) {
+      newX -= charWidth;
+      newY = 0;
+    }
+    
+    // 检查是否超出图片范围
+    if (newX >= 0 && newY < imageHeight) {
+      // 如果目标字符不足显示，切换到上一列的最后一个字符
+      if (imageWidth - newX < charWidth / 2 ||
+          imageHeight - newY < charHeight / 2) {
+        newX -= charWidth;
+        newY = 0;
+        // 检查下一列的第一个字符是否满足条件
+        if (newX >= 0 &&
+            imageWidth - newX >= charWidth / 2 &&
+            imageHeight - newY >= charHeight / 2) {
+          return getNextCharacterPosition(newX, newY, charWidth, charHeight, imageWidth, imageHeight, step - 1);
+        }
+      } else {
+        return getNextCharacterPosition(newX, newY, charWidth, charHeight, imageWidth, imageHeight, step - 1);
+      }
+    }
+    
+    // 如果超出范围，返回原位置
+    return { x: currentX, y: currentY };
+  };
+
+  /**
+   * 计算上n个字符的位置
+   * @param {number} currentX - 当前字符的x坐标
+   * @param {number} currentY - 当前字符的y坐标 
+   * @param {number} charWidth - 字符宽度
+   * @param {number} charHeight - 字符高度
+   * @param {number} imageWidth - 图片总宽度
+   * @param {number} imageHeight - 图片总高度
+   * @param {number} step - 要跳过的字符数，默认为1
+   * @returns {Object} 上n个字符的坐标 {x, y}
+   */
+  const getPreviousCharacterPosition = (currentX, currentY, charWidth, charHeight, imageWidth, imageHeight, step = 1) => {
+    if (step <= 0) {
+      return { x: currentX, y: currentY };
+    }
+    
+    let newY = currentY - charHeight;
+    let newX = currentX;
+    
+    // 如果超出顶部，切换到右边一列
+    if (newY < 0) {
+      newX += charWidth;
+      newY = imageHeight - charHeight;
+    }
+    
+    // 检查是否超出图片范围
+    if (newX < imageWidth && newY >= 0) {
+      // 如果目标字符不足显示，切换到下一列的第一个字符
+      if (imageWidth - newX < charWidth / 2 ||
+          imageHeight - newY < charHeight / 2) {
+        newX += charWidth;
+        newY = 0;
+        // 检查下一列的第一个字符是否满足条件
+        if (newX < imageWidth &&
+            imageWidth - newX >= charWidth / 2 &&
+            imageHeight - newY >= charHeight / 2) {
+          return getPreviousCharacterPosition(newX, newY, charWidth, charHeight, imageWidth, imageHeight, step - 1);
+        }
+      } else {
+        return getPreviousCharacterPosition(newX, newY, charWidth, charHeight, imageWidth, imageHeight, step - 1);
+      }
+    }
+    
+    // 如果超出范围，返回原位置
+    return { x: currentX, y: currentY };
+  };
+
   return (
     <div style={{ marginTop: '20px' }}>
       {/* 字符查看容器 */}
@@ -123,47 +218,24 @@ const CharacterSelector = ({
                 return;
               }
               
-              // 计算上一个字符的位置
-              let newViewBoxY = selectedCharacter.viewBox.y - selectedCharacter.viewBox.height;
-              let newViewBoxX = selectedCharacter.viewBox.x;
+              const { x, y } = getPreviousCharacterPosition(
+                selectedCharacter.viewBox.x,
+                selectedCharacter.viewBox.y,
+                selectedCharacter.viewBox.width,
+                selectedCharacter.viewBox.height,
+                selectedCharacter.width,
+                selectedCharacter.height,
+                1 // 默认跳转1个字符
+              );
               
-              // 如果超出顶部，切换到右边一列
-              if (newViewBoxY < 0) {
-                newViewBoxX += selectedCharacter.viewBox.width;
-                newViewBoxY = selectedCharacter.height - selectedCharacter.viewBox.height;
-              }
-              
-              // 检查是否超出图片范围
-              if (newViewBoxX < selectedCharacter.width && newViewBoxY >= 0) {
-                // 如果目标字符不足显示，切换到下一列的第一个字符
-                if (selectedCharacter.width - newViewBoxX < selectedCharacter.viewBox.width / 2 ||
-                    selectedCharacter.height - newViewBoxY < selectedCharacter.viewBox.height / 2) {
-                  newViewBoxX += selectedCharacter.viewBox.width;
-                  newViewBoxY = 0;
-                  // 检查下一列的第一个字符是否满足条件
-                  if (newViewBoxX < selectedCharacter.width &&
-                      selectedCharacter.width - newViewBoxX >= selectedCharacter.viewBox.width / 2 &&
-                      selectedCharacter.height - newViewBoxY >= selectedCharacter.viewBox.height / 2) {
-                    setSelectedCharacter(prev => ({
-                      ...prev,
-                      viewBox: {
-                        ...prev.viewBox,
-                        x: newViewBoxX,
-                        y: newViewBoxY
-                      }
-                    }));
-                  }
-                } else {
-                  setSelectedCharacter(prev => ({
-                    ...prev,
-                    viewBox: {
-                      ...prev.viewBox,
-                      x: newViewBoxX,
-                      y: newViewBoxY
-                    }
-                  }));
+              setSelectedCharacter(prev => ({
+                ...prev,
+                viewBox: {
+                  ...prev.viewBox,
+                  x,
+                  y
                 }
-              }
+              }));
             }}
           >
             <FaChevronUp size={20} />
@@ -175,47 +247,24 @@ const CharacterSelector = ({
                 return;
               }
               
-              // 计算下一个字符的位置
-              let newViewBoxY = selectedCharacter.viewBox.y + selectedCharacter.viewBox.height;
-              let newViewBoxX = selectedCharacter.viewBox.x;
+              const { x, y } = getNextCharacterPosition(
+                selectedCharacter.viewBox.x,
+                selectedCharacter.viewBox.y,
+                selectedCharacter.viewBox.width,
+                selectedCharacter.viewBox.height,
+                selectedCharacter.width,
+                selectedCharacter.height,
+                1 // 默认跳转1个字符
+              );
               
-              // 如果超出底部，切换到左边一列
-              if (newViewBoxY >= selectedCharacter.height) {
-                newViewBoxX -= selectedCharacter.viewBox.width;
-                newViewBoxY = 0;
-              }
-              
-              // 检查是否超出图片范围
-              if (newViewBoxX >= 0 && newViewBoxY < selectedCharacter.height) {
-                // 如果目标字符不足显示，切换到上一列的最后一个字符
-                if (selectedCharacter.width - newViewBoxX < selectedCharacter.viewBox.width / 2 ||
-                    selectedCharacter.height - newViewBoxY < selectedCharacter.viewBox.height / 2) {
-                  newViewBoxX -= selectedCharacter.viewBox.width;
-                  newViewBoxY = 0;
-                  // 检查下一列的第一个字符是否满足条件
-                  if (newViewBoxX >= 0 &&
-                      selectedCharacter.width - newViewBoxX >= selectedCharacter.viewBox.width / 2 &&
-                      selectedCharacter.height - newViewBoxY >= selectedCharacter.viewBox.height / 2) {
-                    setSelectedCharacter(prev => ({
-                      ...prev,
-                      viewBox: {
-                        ...prev.viewBox,
-                        x: newViewBoxX,
-                        y: newViewBoxY
-                      }
-                    }));
-                  }
-                } else {
-                  setSelectedCharacter(prev => ({
-                    ...prev,
-                    viewBox: {
-                      ...prev.viewBox,
-                      x: newViewBoxX,
-                      y: newViewBoxY
-                    }
-                  }));
+              setSelectedCharacter(prev => ({
+                ...prev,
+                viewBox: {
+                  ...prev.viewBox,
+                  x,
+                  y
                 }
-              }
+              }));
             }}
           >
             <FaChevronDown size={20} />
