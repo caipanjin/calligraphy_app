@@ -2,6 +2,7 @@
 import React, { useState } from 'react';
 import { FaSearchPlus, FaSearchMinus, FaChevronUp, FaChevronDown, FaChevronLeft } from 'react-icons/fa';
 
+const CHAR_SIZE = 360;
 /**
  * 字符选择器组件
  * @param {Object} selectedCharacter - 当前选中的字符信息
@@ -123,8 +124,8 @@ const CharacterSelector = ({
           display: 'flex',
           justifyContent: 'center',
           alignItems: 'center',
-          height: '300px',
-          width: '300px',
+          height: '360px',
+          width: '360px',
           margin: '0 auto',
           border: '1px solid #ccc',
           borderRadius: '8px',
@@ -150,8 +151,8 @@ const CharacterSelector = ({
           onMouseMove={(e) => {
             if (isDragging) {
               // 计算拖动距离并更新视图位置
-              const dx = (e.clientX - dragStart.x) * (selectedCharacter.viewBox.width / 300);
-              const dy = (e.clientY - dragStart.y) * (selectedCharacter.viewBox.height / 300);
+              const dx = (e.clientX - dragStart.x) * (selectedCharacter.viewBox.width / CHAR_SIZE);
+              const dy = (e.clientY - dragStart.y) * (selectedCharacter.viewBox.height / CHAR_SIZE);
               
               setSelectedCharacter(prev => ({
                 ...prev,
@@ -181,8 +182,8 @@ const CharacterSelector = ({
           onTouchMove={(e) => {
             if (isDragging) {
               const touch = e.touches[0];
-              const dx = (touch.clientX - dragStart.x) * (selectedCharacter.viewBox.width / 300);
-              const dy = (touch.clientY - dragStart.y) * (selectedCharacter.viewBox.height / 300);
+              const dx = (touch.clientX - dragStart.x) * (selectedCharacter.viewBox.width / CHAR_SIZE);
+              const dy = (touch.clientY - dragStart.y) * (selectedCharacter.viewBox.height / CHAR_SIZE);
               
               setSelectedCharacter(prev => ({
                 ...prev,
