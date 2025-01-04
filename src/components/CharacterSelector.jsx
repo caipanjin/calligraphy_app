@@ -125,8 +125,6 @@ const CharacterSelector = ({
           display: 'flex',
           justifyContent: 'center',
           alignItems: 'center',
-          height: '360px',
-          width: '360px',
           margin: '0 auto',
           border: '1px solid #ccc',
           borderRadius: '8px',
