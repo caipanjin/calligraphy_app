@@ -14,21 +14,54 @@ const App = () => {
   const [db, setDb] = useState(null);
 
   useEffect(() => {
+    // 检查IndexedDB是否可用
+    if (!('indexedDB' in window)) {
+      console.error('IndexedDB is not supported');
+      return;
+    }
+
+    // 请求存储权限
+    if (navigator.storage && navigator.storage.persist) {
+      navigator.storage.persist().then(granted => {
+        if (!granted) {
+          console.warn('Storage persistence not granted');
+        }
+      });
+    }
+
     const request = indexedDB.open('calligraphyImages', 1);
     
     request.onupgradeneeded = (event) => {
       const db = event.target.result;
-      if (!db.objectStoreNames.contains('images')) {
-        db.createObjectStore('images', { keyPath: 'id' });
+      try {
+        if (!db.objectStoreNames.contains('images')) {
+          db.createObjectStore('images', { keyPath: 'id' });
+        }
+      } catch (error) {
+        console.error('IndexedDB upgrade error:', error);
       }
     };
 
     request.onsuccess = (event) => {
-      setDb(event.target.result);
+      try {
+        setDb(event.target.result);
+      } catch (error) {
+        console.error('IndexedDB connection error:', error);
+      }
     };
 
     request.onerror = (event) => {
       console.error('IndexedDB error:', event.target.error);
+      // 尝试重新连接
+      setTimeout(() => {
+        const retryRequest = indexedDB.open('calligraphyImages', 1);
+        retryRequest.onsuccess = (e) => setDb(e.target.result);
+      }, 1000);
+    };
+
+    // 处理数据库关闭
+    request.onblocked = () => {
+      console.warn('IndexedDB connection blocked');
     };
   }, []);
 
@@ -164,30 +197,56 @@ const App = () => {
 
   // 处理图片上传
   const handleImageUpload = async (e) => {
-    const file = e.target.files[0];
-    if (file) {
-      // 检查文件类型是否为图片
-      if (!file.type.startsWith('image/')) {
+    try {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      // 检查文件类型是否为支持的图片格式
+      const supportedTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+      if (!supportedTypes.includes(file.type)) {
+        alert('仅支持上传JPEG、PNG、GIF和WebP格式的图片');
         return;
       }
 
       const reader = new FileReader();
+      
+      // 添加读取完成处理
       reader.onload = async (e) => {
         try {
           // 将图片转换为base64格式
           const base64Data = e.target.result.split(',')[1];
-          const imageData = `data:image/jpeg;base64,${base64Data}`;
-          setImageWithRecent(imageData);
-          // 如果当前处于字符放大状态，返回完整图片
+          const imageData = `data:${file.type};base64,${base64Data}`;
+          
+          // 验证base64数据
+          if (!base64Data || base64Data.length < 100) {
+            throw new Error('Invalid image data');
+          }
+          
+          await setImageWithRecent(imageData);
           setSelectedCharacter(null);
         } catch (error) {
+          console.error('图片处理失败:', error);
           alert('图片处理失败，请尝试其他图片');
         }
       };
-      reader.onerror = () => {
+
+      // 添加读取错误处理
+      reader.onerror = (error) => {
+        console.error('文件读取错误:', error);
         alert('图片读取失败，请重试');
       };
+
+      // 添加读取中止处理
+      reader.onabort = () => {
+        console.warn('文件读取中止');
+        alert('图片读取被中止');
+      };
+
+      // 开始读取文件
       reader.readAsDataURL(file);
+    } catch (error) {
+      console.error('文件上传错误:', error);
+      alert('文件上传失败，请检查文件后重试');
     }
   };
 

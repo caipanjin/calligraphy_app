@@ -9,9 +9,6 @@ import './index.css'
 
 // 创建 React 根节点并渲染应用
 ReactDOM.createRoot(document.getElementById('root')).render(
-  // 使用严格模式帮助发现潜在问题
-  <React.StrictMode>
-    {/* 渲染主应用组件 */}
-    <App />
-  </React.StrictMode>
+  // 直接渲染应用组件
+  <App />
 )

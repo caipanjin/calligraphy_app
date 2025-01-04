@@ -26,7 +26,3 @@ reports/
 
 # 忽略 Windows 的 Thumbs.db 文件
 Thumbs.db
-
-# 忽略特定的文件或目录
-ios/
-android/
