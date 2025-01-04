@@ -201,6 +201,11 @@ const App = () => {
       const files = Array.from(e.target.files);
       if (files.length === 0) return;
 
+      if (files.length > 5) {
+        alert('一次最多只能上传5个文件');
+        return;
+      }
+
       // 检查文件类型是否为支持的图片格式
       const supportedTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
       const validFiles = files.filter(file => supportedTypes.includes(file.type));
