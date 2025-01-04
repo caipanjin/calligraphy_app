@@ -147,7 +147,19 @@ const RecentImages = ({ recentImages, image, setImage, handleImageUpload, setSel
             
             {/* 图片上传输入框 */}
             <div style={{ marginTop: '10px' }}>
-              <input type="file" accept="image/*" onChange={handleImageUpload} />
+              <input 
+                type="file" 
+                accept="image/*" 
+                multiple
+                onChange={handleImageUpload} 
+                style={{
+                  padding: '8px',
+                  border: '1px solid #ccc',
+                  borderRadius: '4px',
+                  backgroundColor: '#f9f9f9',
+                  cursor: 'pointer'
+                }}
+              />
             </div>
           </>
         )}

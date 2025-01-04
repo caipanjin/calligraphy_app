@@ -198,52 +198,58 @@ const App = () => {
   // 处理图片上传
   const handleImageUpload = async (e) => {
     try {
-      const file = e.target.files[0];
-      if (!file) return;
+      const files = Array.from(e.target.files);
+      if (files.length === 0) return;
 
       // 检查文件类型是否为支持的图片格式
       const supportedTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
-      if (!supportedTypes.includes(file.type)) {
-        alert('仅支持上传JPEG、PNG、GIF和WebP格式的图片');
+      const validFiles = files.filter(file => supportedTypes.includes(file.type));
+      
+      if (validFiles.length === 0) {
+        alert('请选择支持的图片格式（JPEG、PNG、GIF或WebP）');
         return;
       }
 
-      const reader = new FileReader();
+      // 批量处理所有有效文件
+      const uploadPromises = validFiles.map(file => {
+        return new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          
+          reader.onload = async (e) => {
+            try {
+              const base64Data = e.target.result.split(',')[1];
+              const imageData = `data:${file.type};base64,${base64Data}`;
+              
+              if (!base64Data || base64Data.length < 100) {
+                throw new Error('Invalid image data');
+              }
+              
+              await setImageWithRecent(imageData);
+              resolve(imageData);
+            } catch (error) {
+              console.error(`${file.name} 处理失败:`, error);
+              reject(error);
+            }
+          };
+
+          reader.onerror = (error) => {
+            console.error(`${file.name} 读取错误:`, error);
+            reject(error);
+          };
+
+          reader.onabort = () => {
+            console.warn(`${file.name} 读取中止`);
+            reject(new Error('读取中止'));
+          };
+
+          reader.readAsDataURL(file);
+        });
+      });
+
+      // 等待所有文件上传完成
+      const results = await Promise.allSettled(uploadPromises);
       
-      // 添加读取完成处理
-      reader.onload = async (e) => {
-        try {
-          // 将图片转换为base64格式
-          const base64Data = e.target.result.split(',')[1];
-          const imageData = `data:${file.type};base64,${base64Data}`;
-          
-          // 验证base64数据
-          if (!base64Data || base64Data.length < 100) {
-            throw new Error('Invalid image data');
-          }
-          
-          await setImageWithRecent(imageData);
-          setSelectedCharacter(null);
-        } catch (error) {
-          console.error('图片处理失败:', error);
-          alert('图片处理失败，请尝试其他图片');
-        }
-      };
-
-      // 添加读取错误处理
-      reader.onerror = (error) => {
-        console.error('文件读取错误:', error);
-        alert('图片读取失败，请重试');
-      };
-
-      // 添加读取中止处理
-      reader.onabort = () => {
-        console.warn('文件读取中止');
-        alert('图片读取被中止');
-      };
-
-      // 开始读取文件
-      reader.readAsDataURL(file);
+      setSelectedCharacter(null);
     } catch (error) {
       console.error('文件上传错误:', error);
       alert('文件上传失败，请检查文件后重试');
