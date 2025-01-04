@@ -3,6 +3,7 @@ import React, { useState } from 'react';
 import { FaSearchPlus, FaSearchMinus, FaChevronUp, FaChevronDown, FaChevronLeft } from 'react-icons/fa';
 
 const CHAR_SIZE = 360;
+const DEFAULT_ZOOM_FACTOR = 1.1;
 /**
  * 字符选择器组件
  * @param {Object} selectedCharacter - 当前选中的字符信息
@@ -273,9 +274,8 @@ const CharacterSelector = ({
               onClick={() => {
                 if (!selectedCharacter) return;
                 setSelectedCharacter(prev => {
-                  const scaleFactor = 1.1;
-                  const newWidth = prev.viewBox.width / scaleFactor;
-                  const newHeight = prev.viewBox.height / scaleFactor;
+                  const newWidth = prev.viewBox.width / DEFAULT_ZOOM_FACTOR;
+                  const newHeight = prev.viewBox.height / DEFAULT_ZOOM_FACTOR;
                   
                   // 计算字符在图片中的实际中心位置
                   const charCenterX = prev.viewBox.x + (prev.viewBox.width / 2);
@@ -305,9 +305,8 @@ const CharacterSelector = ({
               onClick={() => {
                 if (!selectedCharacter) return;
                 setSelectedCharacter(prev => {
-                  const scaleFactor = 1.1;
-                  const newWidth = prev.viewBox.width * scaleFactor;
-                  const newHeight = prev.viewBox.height * scaleFactor;
+                  const newWidth = prev.viewBox.width * DEFAULT_ZOOM_FACTOR;
+                  const newHeight = prev.viewBox.height * DEFAULT_ZOOM_FACTOR;
                   
                   // 计算字符在图片中的实际中心位置
                   const charCenterX = prev.viewBox.x + (prev.viewBox.width / 2);
