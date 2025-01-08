@@ -20,15 +20,6 @@ const App = () => {
       return;
     }
 
-    // 请求存储权限
-    if (navigator.storage && navigator.storage.persist) {
-      navigator.storage.persist().then(granted => {
-        if (!granted) {
-          console.warn('Storage persistence not granted');
-        }
-      });
-    }
-
     const request = indexedDB.open('calligraphyImages', 1);
     
     request.onupgradeneeded = (event) => {
@@ -281,7 +272,7 @@ const App = () => {
       const effectiveWidth = imgRect.width > 0 ? imgRect.width : naturalWidth;
 
       // 计算字符选择框的尺寸
-      const charAspectRatio = 1.1;
+      const charAspectRatio = 1;
       const charWidth = effectiveWidth * 0.25;
       charHeightRef.current = charWidth * charAspectRatio;
       const minCharHeight = effectiveHeight * 0.1;
