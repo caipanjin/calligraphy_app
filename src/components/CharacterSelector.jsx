@@ -48,7 +48,7 @@ const CharacterSelector = ({
     }
     
     // 检查是否超出图片范围
-    if (newX >= 0 && newY < imageHeight) {
+    if (newX + charWidth / 2 >= 0 && newY < imageHeight) {
       // 如果目标字符不足显示，切换到上一列的最后一个字符
       if (imageWidth - newX < charWidth / 2 ||
           imageHeight - newY < charHeight / 2) {
@@ -90,13 +90,13 @@ const CharacterSelector = ({
     let newX = currentX;
     
     // 如果超出顶部，切换到右边一列
-    if (newY < 0) {
+    if (newY + charHeight / 2 < 0) {
       newX += charWidth;
       newY = imageHeight - charHeight;
     }
     
     // 检查是否超出图片范围
-    if (newX < imageWidth && newY >= 0) {
+    if (newX < imageWidth && (newY + charHeight / 2) >= 0) {
       // 如果目标字符不足显示，切换到下一列的第一个字符
       if (imageWidth - newX < charWidth / 2 ||
           imageHeight - newY < charHeight / 2) {
