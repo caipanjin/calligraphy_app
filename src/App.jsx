@@ -139,18 +139,27 @@ const App = () => {
       // 更新最近图片列表
       const recentRequest = store.getAll();
       recentRequest.onsuccess = () => {
+        // 过滤掉null或undefined的图片
         const images = recentRequest.result
-          .filter(img => img.id !== 'current')
+          .filter(img => img && img.id !== 'current' && img.url)
           .map(img => img.url);
         
         // 如果图片已存在，保持原有顺序；如果不存在，添加到开头
         const existingIndex = images.indexOf(imageData);
-        const updatedImages = existingIndex >= 0 ? images : [imageData, ...images].slice(0, 5);
+        let updatedImages = existingIndex >= 0 ? images : [imageData, ...images];
+        
+        // 过滤掉null值并确保数组长度不超过5
+        updatedImages = updatedImages
+          .filter(url => url) // 过滤掉null/undefined
+          .slice(0, 5); // 截取前5个
+        
         setRecentImages(updatedImages);
         
         // 保存最近图片列表
         updatedImages.forEach((url, index) => {
-          store.put({ id: `recent_${index}`, url });
+          if (url) { // 再次确保url存在
+            store.put({ id: `recent_${index}`, url });
+          }
         });
       };
     }
@@ -213,13 +222,22 @@ const App = () => {
           
           reader.onload = async (e) => {
             try {
-              const base64Data = e.target.result.split(',')[1];
-              const imageData = `data:${file.type};base64,${base64Data}`;
-              
-              if (!base64Data || base64Data.length < 100) {
-                throw new Error('Invalid image data');
+              const result = e.target.result;
+              if (!result || typeof result !== 'string' || !result.startsWith('data:')) {
+                throw new Error('Invalid file data');
               }
               
+              const parts = result.split(',');
+              if (parts.length < 2) {
+                throw new Error('Invalid base64 format');
+              }
+              
+              const base64Data = parts[1];
+              if (!base64Data || base64Data.length < 100 || !/^[A-Za-z0-9+/=]+$/.test(base64Data)) {
+                throw new Error('Invalid base64 data');
+              }
+              
+              const imageData = `data:${file.type};base64,${base64Data}`;
               await setImageWithRecent(imageData);
               resolve(imageData);
             } catch (error) {

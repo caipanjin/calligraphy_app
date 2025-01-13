@@ -55,7 +55,7 @@ const CharacterSelector = ({
         newX -= charWidth;
         newY = 0;
         // 检查下一列的第一个字符是否满足条件
-        if (newX >= 0 &&
+        if (newX + charWidth / 2 >= 0 &&
             imageWidth - newX >= charWidth / 2 &&
             imageHeight - newY >= charHeight / 2) {
           return getNextCharacterPosition(newX, newY, step - 1);
