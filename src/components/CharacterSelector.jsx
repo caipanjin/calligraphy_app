@@ -2,8 +2,10 @@
 import React, { useState } from 'react';
 import { FaSearchPlus, FaSearchMinus, FaChevronUp, FaChevronDown, FaChevronLeft } from 'react-icons/fa';
 
-const CHAR_SIZE = 360;
-const DEFAULT_ZOOM_FACTOR = 1.1;
+//视图容器（即 SVG 元素）的基准尺寸
+const VIEWPORT_SIZE = 360;
+//缩放因子
+const DEFAULT_ZOOM_FACTOR = 1.05;
 /**
  * 字符选择器组件
  * @param {Object} selectedCharacter - 当前选中的字符信息
@@ -150,8 +152,8 @@ const CharacterSelector = ({
           onMouseMove={(e) => {
             if (isDragging) {
               // 计算拖动距离并更新视图位置
-              const dx = (e.clientX - dragStart.x) * (selectedCharacter.viewBox.width / CHAR_SIZE);
-              const dy = (e.clientY - dragStart.y) * (selectedCharacter.viewBox.height / CHAR_SIZE);
+              const dx = (e.clientX - dragStart.x) * (selectedCharacter.viewBox.width / VIEWPORT_SIZE);
+              const dy = (e.clientY - dragStart.y) * (selectedCharacter.viewBox.height / VIEWPORT_SIZE);
               
               setSelectedCharacter(prev => ({
                 ...prev,
@@ -181,8 +183,8 @@ const CharacterSelector = ({
           onTouchMove={(e) => {
             if (isDragging) {
               const touch = e.touches[0];
-              const dx = (touch.clientX - dragStart.x) * (selectedCharacter.viewBox.width / CHAR_SIZE);
-              const dy = (touch.clientY - dragStart.y) * (selectedCharacter.viewBox.height / CHAR_SIZE);
+              const dx = (touch.clientX - dragStart.x) * (selectedCharacter.viewBox.width / VIEWPORT_SIZE);
+              const dy = (touch.clientY - dragStart.y) * (selectedCharacter.viewBox.height / VIEWPORT_SIZE);
               
               setSelectedCharacter(prev => ({
                 ...prev,
