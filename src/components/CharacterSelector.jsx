@@ -1,11 +1,13 @@
 // 导入 React 核心库和状态钩子
 import React, { useState } from 'react';
-import { FaSearchPlus, FaSearchMinus, FaChevronUp, FaChevronDown, FaChevronLeft } from 'react-icons/fa';
+import { FaSearchPlus, FaSearchMinus, FaChevronUp, FaChevronDown, FaChevronLeft, FaChevronRight,FaCaretSquareUp, FaCaretSquareDown, FaCaretLeft } from 'react-icons/fa';
 
 //视图容器（即 SVG 元素）的基准尺寸
 const VIEWPORT_SIZE = 360;
 //缩放因子
 const DEFAULT_ZOOM_FACTOR = 1.05;
+// 微调步长
+const ADJUST_STEP = 2;
 /**
  * 字符选择器组件
  * @param {Object} selectedCharacter - 当前选中的字符信息
@@ -211,10 +213,87 @@ const CharacterSelector = ({
           />
         </svg>
       </div>
-      {/* 导航和控制区域 */}
-      <div style={{ marginTop: '20px', textAlign: 'center' }}>
-        {/* 按钮容器 */}
-        <div style={{ display: 'flex', justifyContent: 'center', gap: '10px' }}>
+        {/* 导航和控制区域 */}
+        <div style={{ marginTop: '20px', textAlign: 'center' }}>
+          {/* 微调按钮容器 */}
+          <div style={{ 
+            display: 'grid',
+            gridTemplateColumns: 'repeat(3, 1fr)',
+            gap: '10px',
+            width: '150px',
+            margin: '0 auto 20px'
+          }}>
+            <div></div>
+            <button
+              style={{ padding: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', border: 'none' }}
+              onClick={() => {
+                if (!selectedCharacter) return;
+                setSelectedCharacter(prev => ({
+                  ...prev,
+                  viewBox: {
+                    ...prev.viewBox,
+                    y: prev.viewBox.y + ADJUST_STEP
+                  }
+                }));
+              }}
+            >
+              <FaChevronUp size={20} />
+            </button>
+            <div></div>
+            <button
+              style={{ padding: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', border: 'none' }}
+              onClick={() => {
+                if (!selectedCharacter) return;
+                setSelectedCharacter(prev => ({
+                  ...prev,
+                  viewBox: {
+                    ...prev.viewBox,
+                    x: prev.viewBox.x + ADJUST_STEP
+                  }
+                }));
+              }}
+            >
+              <FaChevronLeft size={20} />
+            </button>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <div style={{ width: '40px', height: '40px', border: '1px solid #ccc', borderRadius: '4px' }}></div>
+            </div>
+            <button
+              style={{ padding: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', border: 'none' }}
+              onClick={() => {
+                if (!selectedCharacter) return;
+                setSelectedCharacter(prev => ({
+                  ...prev,
+                  viewBox: {
+                    ...prev.viewBox,
+                    x: prev.viewBox.x - ADJUST_STEP
+                  }
+                }));
+              }}
+            >
+              <FaChevronRight size={20} />
+            </button>
+            <div></div>
+            <button
+              style={{ padding: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', border: 'none' }}
+              onClick={() => {
+                if (!selectedCharacter) return;
+                setSelectedCharacter(prev => ({
+                  ...prev,
+                  viewBox: {
+                    ...prev.viewBox,
+                    y: prev.viewBox.y - ADJUST_STEP
+                  }
+                }));
+              }}
+            >
+              <FaChevronDown size={20} />
+            </button>
+            <div></div>
+          </div>
+
+          {/* 原始按钮容器 */}
+          <div style={{ display: 'flex', justifyContent: 'center', gap: '10px' }}>
           <button
             style={{ padding: '10px 20px', display: 'flex', alignItems: 'center', background: 'transparent', border: 'none' }}
             onClick={() => {
@@ -240,7 +319,7 @@ const CharacterSelector = ({
               }
             }}
           >
-            <FaChevronUp size={20} />
+            <FaCaretSquareUp size={20} />
           </button>
           <button
             style={{ padding: '10px 20px', display: 'flex', alignItems: 'center', background: 'transparent', border: 'none' }}
@@ -267,7 +346,7 @@ const CharacterSelector = ({
               }
             }}
           >
-            <FaChevronDown size={20} />
+            <FaCaretSquareDown size={20} />
           </button>
           <button
             style={{ padding: '10px 20px', display: 'flex', alignItems: 'center', background: 'transparent', border: 'none' }}
@@ -429,7 +508,7 @@ const CharacterSelector = ({
           }}
           onClick={() => setSelectedCharacter(null)}
         >
-          <FaChevronLeft style={{ marginRight: '8px' }} />
+          <FaCaretLeft style={{ marginRight: '8px' }} />
           返回完整图片
         </button>
       </div>
