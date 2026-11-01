@@ -13,8 +13,10 @@
 
 // 分析用图的最大边长（太大只影响速度，不影响切分质量）
 const MAX_ANALYSIS_SIZE = 1600;
-// 判定「该列/行有墨」的最小投影占比
-const INK_RATIO = 0.004;
+// 判定「有墨」的投影阈值：占该轴投影 90 分位值的比例
+// （绝对值在实拍照片上会失效——噪点和底色不均会让空白列也被判成有墨）
+const INK_RATIO = 0.15;
+const INK_PERCENTILE = 0.9;
 // 空白带最小宽度占比（小于它的空白视为字内笔画间隙）
 const GAP_RATIO = 0.008;
 // 单个字块最小边长占比
@@ -133,12 +135,43 @@ export const projectRows = (ink, width, height, x0 = 0, x1 = width) => {
  * @param {Uint32Array} sums 投影值
  * @param {Object} options minInk 判定有墨的阈值；minGap 视为分隔的最小空白；minSize 段的最小长度
  */
-export const findBands = (sums, { minInk, minGap, minSize }) => {
+/** 滑动平均，抑制投影里的单像素噪声 */
+const smoothProfile = (sums, window = 3) => {
+  if (window <= 1) return sums;
+  const out = new Float32Array(sums.length);
+  const half = Math.floor(window / 2);
+  for (let i = 0; i < sums.length; i += 1) {
+    let sum = 0;
+    let count = 0;
+    for (let j = i - half; j <= i + half; j += 1) {
+      if (j >= 0 && j < sums.length) {
+        sum += sums[j];
+        count += 1;
+      }
+    }
+    out[i] = sum / count;
+  }
+  return out;
+};
+
+/** 分位数：用 90 分位而非最大值作参考，避免个别超密列拉高阈值 */
+const percentile = (values, ratio) => {
+  if (!values.length) return 0;
+  const sorted = Array.from(values).sort((a, b) => a - b);
+  const index = Math.min(sorted.length - 1, Math.max(0, Math.round((sorted.length - 1) * ratio)));
+  return sorted[index];
+};
+
+export const findBands = (sums, { relInk = INK_RATIO, minGap, minSize, smooth = 3 }) => {
+  const profile = smoothProfile(sums, smooth);
+  const reference = percentile(profile, INK_PERCENTILE);
+  const minInk = Math.max(1.5, reference * relInk);
+
   const runs = [];
   let start = -1;
 
-  for (let i = 0; i <= sums.length; i += 1) {
-    const active = i < sums.length && sums[i] >= minInk;
+  for (let i = 0; i <= profile.length; i += 1) {
+    const active = i < profile.length && profile[i] >= minInk;
     if (active && start < 0) start = i;
     if (!active && start >= 0) {
       runs.push([start, i]);
@@ -202,20 +235,18 @@ export const segmentCharacters = async (imageSrc, options = {}) => {
   const img = await loadImageElement(imageSrc);
   const { width: W, height: H, ink, scale } = buildInkMask(img, maxSize);
 
-  const inkCol = Math.max(1, Math.round(H * INK_RATIO));
-  const inkRow = Math.max(1, Math.round(W * INK_RATIO));
   const gapCol = Math.max(2, Math.round(W * GAP_RATIO));
   const gapRow = Math.max(2, Math.round(H * GAP_RATIO));
   const minSizeCol = Math.max(2, Math.round(W * MIN_SIZE_RATIO));
   const minSizeRow = Math.max(2, Math.round(H * MIN_SIZE_RATIO));
 
   const colBands = findBands(projectColumns(ink, W, H), {
-    minInk: inkCol,
+    relInk: INK_RATIO,
     minGap: gapCol,
     minSize: minSizeCol
   });
   const rowBands = findBands(projectRows(ink, W, H), {
-    minInk: inkRow,
+    relInk: INK_RATIO,
     minGap: gapRow,
     minSize: minSizeRow
   });
@@ -249,7 +280,7 @@ export const segmentCharacters = async (imageSrc, options = {}) => {
     // 竖排从右往左读
     [...colBands].reverse().forEach((col) => {
       const charBands = findBands(projectRows(ink, W, H, col.start, col.end), {
-        minInk: Math.max(1, Math.round((col.end - col.start) * 0.02)),
+        relInk: INK_RATIO,
         minGap: gapRow,
         minSize: minSizeRow
       });
@@ -269,7 +300,7 @@ export const segmentCharacters = async (imageSrc, options = {}) => {
     columnCount = rowBands.length;
     rowBands.forEach((row) => {
       const charBands = findBands(projectColumns(ink, W, H, row.start, row.end), {
-        minInk: Math.max(1, Math.round((row.end - row.start) * 0.02)),
+        relInk: INK_RATIO,
         minGap: gapCol,
         minSize: minSizeCol
       });
