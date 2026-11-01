@@ -8,6 +8,7 @@ import './index.css';
 import RecentImages from './components/RecentImages';
 import ImageViewer from './components/ImageViewer';
 import CharacterSelector from './components/CharacterSelector';
+import OCRResults from './components/OCRResults';
 
 const App = () => {
   // 初始化IndexedDB
@@ -166,6 +167,9 @@ const App = () => {
 
     // 显示最近图片列表
     setShowRecentImages(true);
+    
+    // 触发 OCR 识别
+    setShowOCR(true);
   };
   
   // 当前选中的字符信息
@@ -188,6 +192,9 @@ const App = () => {
   
   // 是否显示最近图片列表
   const [showRecentImages, setShowRecentImages] = useState(false);
+  
+  // OCR 识别相关状态
+  const [showOCR, setShowOCR] = useState(false);
   
   // 图片元素的引用
   const imageRef = useRef(null);
@@ -364,6 +371,18 @@ const App = () => {
           selectedCharacter={selectedCharacter}
           setSelectedCharacter={setSelectedCharacter}
           charHeightRef={charHeightRef}
+        />
+      )}
+
+      {/* OCR 识别结果组件 */}
+      {showOCR && image && !selectedCharacter && (
+        <OCRResults
+          image={image}
+          onSelectCharacter={(charData) => {
+            setSelectedCharacter(charData);
+            setShowOCR(false);
+          }}
+          onClose={() => setShowOCR(false)}
         />
       )}
     </div>
