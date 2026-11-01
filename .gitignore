@@ -20,9 +20,6 @@ build/
 # 忽略本地 agent 工具状态
 .pilotdeck/
 
-# OCR 离线资源由 scripts/fetch-ocr-assets.mjs 生成（约 12MB，不入库）
-public/tesseract/
-
 # 忽略测试报告和覆盖率报告
 coverage/
 reports/
@@ -32,6 +29,3 @@ reports/
 
 # 忽略 Windows 的 Thumbs.db 文件
 Thumbs.db
-
-# OCR 引擎对比测试的二进制资源（约 7MB，可重新生成，见 openspec/changes/ocr-accuracy-tuning.md）
-demo/

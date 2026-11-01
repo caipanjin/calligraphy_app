@@ -23,11 +23,11 @@
 ### 2.3 主要依赖
 - react-image-magnifiers: 图片放大镜功能
 - react-icons: 图标库
-- tesseract.js: OCR 文字识别（worker + wasm core + 中英文语言包全部本地化，离线可用）
+- 无 OCR 依赖：文字识别已移除（通用 OCR 对毛笔字无效，详见 changes/ocr-removed-projection-segmentation.md）
 
 ### 2.4 数据存储
 - IndexedDB: 本地离线存储图片和历史记录
-- 离线 OCR 资源: `public/tesseract/`（约 12MB，由 `npm run ocr:assets` 生成，不入 git）
+- 自动切字：纯前端投影算法（`src/utils/segment.js`），无模型、毫秒级、完全离线
 
 ## 3. 功能规范
 
@@ -94,11 +94,11 @@ calligraphy_app/
 │   └── components/
 │       ├── Library.jsx         # 字帖库（网格卡片 / 空状态 / 添加）
 │       ├── PracticeView.jsx    # 临摹页（图片舞台 + 单字临摹 + 手势）
-│       ├── OCRSheet.jsx        # 文字识别底部抽屉
+│       ├── SegmentSheet.jsx    # 自动切字底部抽屉
 │       ├── SettingsView.jsx    # 设置页（外观 / 数据 / 关于）
 │       └── Toast.jsx           # 轻提示
 │   ├── utils/
-│   │   ├── ocr.js              # OCR 预处理 / 识别 / 坐标映射
+│   │   ├── segment.js          # 投影切分（墨迹掩码 / 投影 / 字块）
 │   │   └── charNav.js          # 竖排字符导航（纯函数）
 │   └── index.css               # 设计系统（令牌 + 组件样式 + 双主题）
 ├── docs/screens/             # 界面截图
@@ -143,26 +143,27 @@ calligraphy_app/
 - 字符滑轨（前 2 / 当前 / 后 2）与底部工具栏（上一字 / 缩小 / 微调 / 放大 / 下一字）
 - 微调方向盘、桌面端键盘快捷键
 
-### 5.4 OCRSheet.jsx
-- 底部抽屉：进度环、失败分类提示、重新识别
-- 「识别文字 / 原图标注」分段视图，点字进入单字临摹
+### 5.4 SegmentSheet.jsx
+- 底部抽屉：在整幅图上叠加切分框，点任意框进入单字临摹
+- 「自动 / 竖排 / 横排」分段切换，可重新切分
+- 切不出字时引导手动点选
 
 ### 5.5 utils/charNav.js
 - `getNextCharacterPosition` / `getPreviousCharacterPosition`：竖排按列推进
 - `getCharacterNeighborhood`：生成滑轨的 5 个位置
 - 从组件中提取为纯函数，与原实现做过 24000 次等价性对照
 
-### 5.6 utils/ocr.js
-- `preprocessImage`: 限尺寸（最长边 2000px）+ 灰度化 + Gamma 对比度增强，返回 `{ dataUrl, scale }`
-- `recognizeText`: 单例 worker、任务串行队列、超时重置、按图片哈希缓存结果
-- `mapBboxToSource`: 把预处理图坐标系的 bbox 回算到原图坐标系
-- `groupWordsByLine`: 按 y 聚行、行内按 x 排序
+### 5.6 utils/segment.js
+- `buildInkMask`: 缩放 + 灰度 + Otsu 二值化 + 反色修正，产出墨迹掩码
+- `projectColumns` / `projectRows`: 垂直 / 水平墨迹投影
+- `findBands`: 从投影中找出有墨连续段，合并字内间隙、过滤噪点
+- `segmentCharacters`: 按列/行递归切分，超大块按中位字高等分，返回原图坐标的字框
 
 ## 6. 已知问题
 
 1. react-image-magnifiers 存在 peer dependency 警告
-2. OCR 对书法字体识别准确率有限（训练数据以印刷体为主），识别失败时依赖手动选字
-3. 识别按横排（按 y 聚行）处理，竖排书法尚未按列切分
+2. 自动切分依赖背景干净、字距规整；透视严重或墨迹粘连的照片可能切不准，此时用手动点选
+3. 版面（竖排/横排）自动判定对非规则网格可能出错，面板上可一键切换
 
 ## 7. 待完善功能
 

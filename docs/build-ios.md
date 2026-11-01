@@ -36,8 +36,7 @@ npm run ios:open
 | `npm run ios:open` | 上面 + 打开 Xcode | 准备真机调试 |
 | `npm run android:copy` / `:sync` / `:open` | Android 对应命令 | — |
 
-> `npm run build` 会自动执行 `prebuild`，先把 OCR 离线资源（约 12MB）准备好，
-> 所以 `dist/tesseract/` 和 `ios/App/App/public/tesseract/` 都会带上，离线识别才能用。
+> 构建产物只有纯前端代码（约 260KB），不含任何模型文件——自动切字是纯几何算法，无需模型。
 
 ## 判断是否同步成功
 

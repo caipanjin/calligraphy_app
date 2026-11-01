@@ -7,7 +7,7 @@ import {
   FaChevronRight,
   FaSearchPlus,
   FaSearchMinus,
-  FaAlignLeft,
+  FaTh,
   FaImages,
   FaArrowsAlt,
   FaRegHandPointer
@@ -55,7 +55,7 @@ const touchDistance = (touches) => {
 /**
  * 临摹页：图片模式（点选单字）与单字模式（拖动 / 双指缩放 / 导航）
  */
-const PracticeView = ({ image, title, selectedCharacter, setSelectedCharacter, onBack, onOpenOCR, recentImages = [], onSwitchImage }) => {
+const PracticeView = ({ image, title, selectedCharacter, setSelectedCharacter, onBack, onOpenSegment, recentImages = [], onSwitchImage }) => {
   const frameRef = useRef(null);
   const canvasRef = useRef(null);
   const gestureRef = useRef({ mode: 'none', x: 0, y: 0 });
@@ -388,9 +388,9 @@ const PracticeView = ({ image, title, selectedCharacter, setSelectedCharacter, o
           )}
 
           <div className="stage-actions">
-            <button className="btn btn--ghost btn--block" onClick={onOpenOCR}>
-              <FaAlignLeft size={13} />
-              识别文字，按字跳转
+            <button className="btn btn--ghost btn--block" onClick={onOpenSegment}>
+              <FaTh size={13} />
+              自动切字，逐字临摹
             </button>
           </div>
         </div>

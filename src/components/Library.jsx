@@ -102,7 +102,7 @@ const Library = ({ images, currentImage, onOpen, onRequestDelete, onPickFiles })
             <div className="settings-row">
               <FaFeatherAlt size={15} style={{ color: 'var(--accent)', flexShrink: 0 }} />
               <span className="settings-row__label" style={{ fontSize: 13, color: 'var(--ink-2)' }}>
-                打开字帖后轻触任意位置即可锁定单字，方向与缩放按钮可微调选取范围。
+                打开字帖后可点「自动切字」整页切成单字，也可轻触任意位置手动选字。
               </span>
             </div>
             <div className="settings-row">

@@ -62,8 +62,8 @@ const SettingsView = ({ theme, onChangeTheme, stickerCount, maxStickers, onClear
           </div>
           <div className="settings-row">
             <FaRegLightbulb size={14} style={{ color: 'var(--ink-3)' }} />
-            <span className="settings-row__label">文字识别</span>
-            <span className="settings-row__value">离线引擎</span>
+            <span className="settings-row__label">自动切字</span>
+            <span className="settings-row__value">投影法 · 离线</span>
           </div>
           <div className="settings-row" style={{ alignItems: 'flex-start' }}>
             <span className="settings-row__label" style={{ fontSize: 12.5, lineHeight: 1.7, color: 'var(--ink-3)' }}>

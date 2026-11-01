@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import './index.css';
 import Library, { MAX_STICKERS } from './components/Library';
 import PracticeView from './components/PracticeView';
-import OCRSheet from './components/OCRSheet';
+import SegmentSheet from './components/SegmentSheet';
 import SettingsView from './components/SettingsView';
 import Toast from './components/Toast';
 import { FaImages, FaCog, FaPlus } from 'react-icons/fa';
@@ -44,7 +44,7 @@ const App = () => {
   const [tab, setTab] = useState('library');
   const [mode, setMode] = useState('library');
   const [selectedCharacter, setSelectedCharacter] = useState(null);
-  const [showOCR, setShowOCR] = useState(false);
+  const [showSegment, setShowSegment] = useState(false);
   const [deleteIndex, setDeleteIndex] = useState(null);
   const [toast, setToast] = useState('');
   const [theme, setTheme] = useState(() => {
@@ -201,7 +201,7 @@ const App = () => {
     (url) => {
       setImage(url);
       setSelectedCharacter(null);
-      setShowOCR(false);
+      setShowSegment(false);
       setMode('practice');
       persistCurrent(url);
       window.scrollTo({ top: 0 });
@@ -316,7 +316,7 @@ const App = () => {
   const handleBackToLibrary = useCallback(() => {
     setMode('library');
     setSelectedCharacter(null);
-    setShowOCR(false);
+    setShowSegment(false);
   }, []);
 
   const currentIndex = recentImages.findIndex((item) => item.url === image);
@@ -343,7 +343,7 @@ const App = () => {
           selectedCharacter={selectedCharacter}
           setSelectedCharacter={setSelectedCharacter}
           onBack={handleBackToLibrary}
-          onOpenOCR={() => setShowOCR(true)}
+          onOpenSegment={() => setShowSegment(true)}
           recentImages={recentImages}
           onSwitchImage={handleSwitchImage}
         />
@@ -402,14 +402,14 @@ const App = () => {
         </>
       )}
 
-      {showOCR && image && (
-        <OCRSheet
+      {showSegment && image && (
+        <SegmentSheet
           image={image}
           onSelectCharacter={(character) => {
             setSelectedCharacter(character);
-            setShowOCR(false);
+            setShowSegment(false);
           }}
-          onClose={() => setShowOCR(false)}
+          onClose={() => setShowSegment(false)}
         />
       )}
 
