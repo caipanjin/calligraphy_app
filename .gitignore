@@ -32,3 +32,6 @@ reports/
 
 # 忽略 Windows 的 Thumbs.db 文件
 Thumbs.db
+
+# OCR 引擎对比测试的二进制资源（约 7MB，可重新生成，见 openspec/changes/ocr-accuracy-tuning.md）
+demo/

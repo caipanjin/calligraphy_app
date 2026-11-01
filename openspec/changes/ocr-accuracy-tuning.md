@@ -61,6 +61,45 @@
 
 端到端复测（真实应用，毛笔字体页面）：**60% 字符命中、置信度 63%、无英文输出**。
 
+## PaddleOCR 实测结果（重要）
+
+按「先验证再集成」的思路做了对比测试页 `ocr-demo.html`，同一张图分别跑两个引擎：
+
+**印刷体（宋体，900×400，真值「永和九年」）**
+
+| 引擎 | 结果 | 耗时（软件渲染） |
+|---|---|---|
+| PaddleOCR | 永和九年 ✅ | 模型加载 47s + 识别 44s |
+| Tesseract | 永和九年 ✅ | ~1s |
+
+**毛笔字（马善政毛笔楷书竖排，8 字，真值「永和九年歲在癸丑」）**
+
+| 引擎 | 结果 | 命中 |
+|---|---|---|
+| PaddleOCR | `P馬孜`（只认出 3 个字符） | **0/8** |
+| Tesseract | `成永在和矢九妃年` | **5/8（62%）** |
+
+→ **PaddleOCR（PP-OCRv2）在毛笔字上比 tesseract 更差。**
+两者都是「印刷体/场景文字」模型，遇到毛笔笔画同属分布外输入。
+说明瓶颈不在引擎精度，而在**任务本身**：通用 OCR 不解决书法识别。
+
+### 测试页复现方式
+
+```bash
+# 1. 准备二进制资源（不进仓库）
+npm install --no-save --legacy-peer-deps @paddlejs-models/ocr@1.2.4
+mkdir -p demo/vendor demo/fonts
+cp node_modules/@paddlejs-models/ocr/lib/index.js demo/vendor/paddlejs-ocr.js
+curl -sL -o demo/fonts/MaShanZheng.ttf \
+  https://raw.githubusercontent.com/google/fonts/main/ofl/mashanzheng/MaShanZheng-Regular.ttf
+
+# 2. 起服务，手机访问同一局域网的 /ocr-demo.html
+npm run dev
+```
+
+> Paddle 的包是 UMD/Emscripten 产物，必须用经典 `<script>` 加载
+> （`window.paddlejs.ocr`），走 Vite 的 ESM 预打包会报 `Module is not defined`。
+
 ## 换引擎的可行性调研
 
 | 方案 | 状态 | 说明 |
