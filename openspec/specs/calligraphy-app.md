@@ -23,10 +23,11 @@
 ### 2.3 主要依赖
 - react-image-magnifiers: 图片放大镜功能
 - react-icons: 图标库
-- tesseract.js: OCR 文字识别 (已安装，未使用)
+- tesseract.js: OCR 文字识别（worker + wasm core + 中英文语言包全部本地化，离线可用）
 
 ### 2.4 数据存储
 - IndexedDB: 本地离线存储图片和历史记录
+- 离线 OCR 资源: `public/tesseract/`（约 12MB，由 `npm run ocr:assets` 生成，不入 git）
 
 ## 3. 功能规范
 
@@ -130,14 +131,25 @@ calligraphy_app/
 - 相邻字符预览缩略图
 - 返回完整图片按钮
 
+### 5.5 OCRResults.jsx
+- 按需触发的识别面板（点击“识别文字”按钮后加载）
+- 识别进度条、错误分类提示与重新识别入口
+- 原图标注框，点框或点文字回填 viewBox 进入字符视图
+
+### 5.6 utils/ocr.js
+- `preprocessImage`: 限尺寸（最长边 2000px）+ 灰度化 + Gamma 对比度增强，返回 `{ dataUrl, scale }`
+- `recognizeText`: 单例 worker、任务串行队列、超时重置、按图片哈希缓存结果
+- `mapBboxToSource`: 把预处理图坐标系的 bbox 回算到原图坐标系
+- `groupWordsByLine`: 按 y 聚行、行内按 x 排序
+
 ## 6. 已知问题
 
-1. tesseract.js 已安装但未集成使用
-2. react-image-magnifiers 存在 peer dependency 警告
+1. react-image-magnifiers 存在 peer dependency 警告
+2. OCR 对书法字体识别准确率有限（训练数据以印刷体为主），识别失败时依赖手动选字
+3. 识别按横排（按 y 聚行）处理，竖排书法尚未按列切分
 
 ## 7. 待完善功能
 
-- OCR 文字识别集成
-- 字符智能识别
+- 整幅作品自动切字（按竖排列切分）
 - 临摹对比功能
 - 导出/分享功能
