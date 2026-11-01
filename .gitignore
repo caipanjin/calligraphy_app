@@ -1,5 +1,5 @@
 # 忽略 Node.js 模块
-#node_modules/
+node_modules/
 
 # 忽略虚拟环境
 venv/
