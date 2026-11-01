@@ -62,7 +62,7 @@ const SegmentSheet = ({ image, onSelectCharacter, onClose }) => {
 
   const handleRetry = useCallback(() => setAttempt((value) => value + 1), []);
 
-  const handlePick = (box) => {
+  const handlePick = (box, index) => {
     const padding = Math.max(2, Math.round(Math.min(box.width, box.height) * 0.06));
     const x = Math.max(0, box.x - padding);
     const y = Math.max(0, box.y - padding);
@@ -75,7 +75,9 @@ const SegmentSheet = ({ image, onSelectCharacter, onClose }) => {
         y,
         width: Math.min(imageSize.width - x, box.width + padding * 2),
         height: Math.min(imageSize.height - y, box.height + padding * 2)
-      }
+      },
+      // 带上切分网格：临摹页的「上一字 / 下一字」按真实字框跳，而不是等距推算
+      grid: { boxes, index }
     });
   };
 
@@ -142,7 +144,7 @@ const SegmentSheet = ({ image, onSelectCharacter, onClose }) => {
                     width: `${(box.width / imageSize.width) * 100}%`,
                     height: `${(box.height / imageSize.height) * 100}%`
                   }}
-                  onClick={() => handlePick(box)}
+                  onClick={() => handlePick(box, index)}
                   aria-label={`选择第 ${index + 1} 个字`}
                 />
               ))}

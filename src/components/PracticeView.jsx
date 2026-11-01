@@ -146,8 +146,48 @@ const PracticeView = ({ image, title, selectedCharacter, setSelectedCharacter, o
     [applyViewBox]
   );
 
+  // 切分网格（从「自动切字」进入时带上）：导航按真实字框跳，避免等距推算的累积误差
+  const grid = selectedCharacter && selectedCharacter.grid ? selectedCharacter.grid : null;
+
+  const boxToViewBox = useCallback(
+    (box) => {
+      const padding = Math.max(2, Math.round(Math.min(box.width, box.height) * 0.06));
+      const x = Math.max(0, box.x - padding);
+      const y = Math.max(0, box.y - padding);
+      return {
+        x,
+        y,
+        width: Math.min(selectedCharacter.width - x, box.width + padding * 2),
+        height: Math.min(selectedCharacter.height - y, box.height + padding * 2)
+      };
+    },
+    [selectedCharacter]
+  );
+
+  const selectGridIndex = useCallback(
+    (index) => {
+      if (!grid || index < 0 || index >= grid.boxes.length) return false;
+      const box = grid.boxes[index];
+      setSelectedCharacter((prev) =>
+        prev
+          ? {
+              ...prev,
+              viewBox: boxToViewBox(box),
+              grid: { boxes: grid.boxes, index }
+            }
+          : prev
+      );
+      return true;
+    },
+    [boxToViewBox, grid, setSelectedCharacter]
+  );
+
   const goNext = useCallback(() => {
     if (!selectedCharacter) return;
+    if (grid) {
+      selectGridIndex(grid.index + 1);
+      return;
+    }
     const position = getNextCharacterPosition(
       selectedCharacter,
       selectedCharacter.viewBox.x,
@@ -156,10 +196,14 @@ const PracticeView = ({ image, title, selectedCharacter, setSelectedCharacter, o
     );
     if (isHiddenPosition(position)) return;
     applyViewBox((viewBox) => ({ ...viewBox, x: position.x, y: position.y }));
-  }, [applyViewBox, selectedCharacter]);
+  }, [applyViewBox, grid, selectGridIndex, selectedCharacter]);
 
   const goPrev = useCallback(() => {
     if (!selectedCharacter) return;
+    if (grid) {
+      selectGridIndex(grid.index - 1);
+      return;
+    }
     const position = getPreviousCharacterPosition(
       selectedCharacter,
       selectedCharacter.viewBox.x,
@@ -168,7 +212,7 @@ const PracticeView = ({ image, title, selectedCharacter, setSelectedCharacter, o
     );
     if (isHiddenPosition(position)) return;
     applyViewBox((viewBox) => ({ ...viewBox, x: position.x, y: position.y }));
-  }, [applyViewBox, selectedCharacter]);
+  }, [applyViewBox, grid, selectGridIndex, selectedCharacter]);
 
   /* ---------------- 鼠标 / 触摸手势 ---------------- */
 
@@ -334,7 +378,22 @@ const PracticeView = ({ image, title, selectedCharacter, setSelectedCharacter, o
 
   /* ---------------- 渲染 ---------------- */
 
-  const neighborhood = selectedCharacter ? getCharacterNeighborhood(selectedCharacter) : [];
+  const neighborhood = selectedCharacter
+    ? grid
+      ? [-2, -1, 0, 1, 2].map((offset) => {
+          const targetIndex = grid.index + offset;
+          const box = grid.boxes[targetIndex];
+          return box
+            ? { x: box.x, y: box.y, width: box.width, height: box.height, index: targetIndex }
+            : { x: -1, y: -1, width: 0, height: 0, index: -1 };
+        })
+      : getCharacterNeighborhood(selectedCharacter).map((position) => ({
+          ...position,
+          width: selectedCharacter.viewBox.width,
+          height: selectedCharacter.viewBox.height,
+          index: -1
+        }))
+    : [];
 
   return (
     <div className="practice">
@@ -441,23 +500,30 @@ const PracticeView = ({ image, title, selectedCharacter, setSelectedCharacter, o
 
             <div className="char-strip">
               {neighborhood.map((position, index) => {
-                const hidden = isHiddenPosition(position);
-                const active =
-                  position.x === selectedCharacter.viewBox.x && position.y === selectedCharacter.viewBox.y;
+                const hidden = position.x === -1 && position.y === -1;
+                const active = grid
+                  ? position.index === grid.index
+                  : position.x === selectedCharacter.viewBox.x &&
+                    position.y === selectedCharacter.viewBox.y;
                 return (
                   <button
                     key={index}
                     className={`char-thumb${active ? ' char-thumb--active' : ''}${
                       hidden ? ' char-thumb--empty' : ''
                     }`}
-                    onClick={() =>
-                      !hidden && applyViewBox((viewBox) => ({ ...viewBox, x: position.x, y: position.y }))
-                    }
+                    onClick={() => {
+                      if (hidden) return;
+                      if (grid && position.index >= 0) {
+                        selectGridIndex(position.index);
+                        return;
+                      }
+                      applyViewBox((viewBox) => ({ ...viewBox, x: position.x, y: position.y }));
+                    }}
                     disabled={hidden}
                     aria-label={active ? '当前字' : '跳转到相邻字'}
                   >
                     <svg
-                      viewBox={`${position.x} ${position.y} ${selectedCharacter.viewBox.width} ${selectedCharacter.viewBox.height}`}
+                      viewBox={`${position.x} ${position.y} ${position.width} ${position.height}`}
                       preserveAspectRatio="xMidYMid meet"
                     >
                       <image
