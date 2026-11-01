@@ -35,6 +35,7 @@
   --radius-xl: 26px;
   --header-h: 56px;
   --tabbar-h: 60px;
+  --safe-top: env(safe-area-inset-top, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
 }
 
@@ -118,8 +119,9 @@ button {
   display: flex;
   align-items: center;
   gap: 8px;
-  height: var(--header-h);
-  padding: 0 8px 0 16px;
+  height: auto;
+  min-height: calc(var(--header-h) + var(--safe-top));
+  padding: var(--safe-top) 8px 0 16px;
   background: color-mix(in srgb, var(--bg) 82%, transparent);
   backdrop-filter: saturate(180%) blur(14px);
   -webkit-backdrop-filter: saturate(180%) blur(14px);
@@ -488,7 +490,7 @@ button {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 6px 8px;
+  padding: calc(6px + var(--safe-top)) 8px 6px;
   z-index: 10;
 }
 

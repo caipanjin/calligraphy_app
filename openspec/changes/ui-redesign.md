@@ -81,6 +81,30 @@
 
 验证：网格 4 项等宽（173px）、像素扫描首行两块差 0.5px、交互回归 13/13 通过、无运行时异常。
 
+## 第三轮：iOS 安全区适配
+
+真机反馈「返回按钮跑到顶部，和状态栏时间重叠」。
+
+原因：`index.html` 设置了 `viewport-fit=cover`（让页面延伸到刘海/灵动岛下方），
+但样式只处理了 `env(safe-area-inset-bottom)`，**漏了顶部**，导致顶栏内容压到状态栏下面。
+
+修复：
+
+- 新增 `--safe-top: env(safe-area-inset-top, 0px)`
+- `.app-header`：`height` 改为 `min-height: calc(56px + safe-top)`，并加 `padding-top: safe-top`
+- `.practice__bar`：`padding-top: calc(6px + safe-top)`
+
+验证（模拟 iPhone 15 Pro：safe-top 59 / safe-bottom 34）：
+
+| 项目 | 结果 |
+|---|---|
+| 库页顶栏高度 | 115px = 56 + 59 ✅ |
+| 标题 / 图标 top | 65px（在状态栏之下）✅ |
+| 临摹页返回按钮 top | 65px ✅ |
+| Tab 栏高度 | 94px = 60 + 34 ✅ |
+| 单字页工具栏距底 | 46px（34 安全区 + 12 内边距）✅ |
+| 普通浏览器（无安全区） | 顶栏仍为 56px，无回归 ✅ |
+
 ## 遗留
 
 - 无手势提示层（首次进入单字模式未引导双指缩放）
