@@ -3,7 +3,7 @@
  * 运行：npm test
  */
 import assert from 'node:assert/strict';
-import { findBands, otsuThreshold } from '../src/utils/segment.js';
+import { findBands, otsuThreshold, estimatePitch, buildGridBoxes } from '../src/utils/segment.js';
 
 let passed = 0;
 const check = (name, fn) => {
@@ -70,6 +70,52 @@ check('Otsu 阈值落在双峰之间', () => {
   for (let i = 180; i < 220; i += 1) histogram[i] = 100;
   const threshold = otsuThreshold(histogram, 10000);
   assert.ok(threshold > 55 && threshold < 185, `threshold=${threshold}`);
+});
+
+check('字距估计：周期 20 的投影', () => {
+  const profile = new Float32Array(400);
+  for (let i = 0; i < 400; i += 1) profile[i] = i % 20 < 10 ? 100 : 5;
+  const { pitch } = estimatePitch(profile, 0.05, 0.3);
+  assert.ok(Math.abs(pitch - 20) <= 1, `pitch=${pitch}`);
+});
+
+check('字距估计：周期 50 的投影', () => {
+  const profile = new Float32Array(600);
+  for (let i = 0; i < 600; i += 1) profile[i] = i % 50 < 25 ? 80 : 3;
+  const { pitch } = estimatePitch(profile, 0.05, 0.4);
+  assert.ok(Math.abs(pitch - 50) <= 1, `pitch=${pitch}`);
+});
+
+check('网格拟合：3 列 × 2 行，竖排从右往左', () => {
+  const W = 300;
+  const H = 200;
+  const ink = new Uint8Array(W * H);
+  const blocks = [];
+  for (let r = 0; r < 2; r += 1) {
+    for (let c = 0; c < 3; c += 1) {
+      const x0 = 10 + c * 100;
+      const y0 = 10 + r * 100;
+      blocks.push({ x0, y0 });
+      for (let y = y0; y < y0 + 80; y += 1) {
+        for (let x = x0; x < x0 + 80; x += 1) ink[y * W + x] = 1;
+      }
+    }
+  }
+  const boxes = buildGridBoxes(ink, W, H, 100, 'vertical');
+  assert.equal(boxes.length, 6);
+  // 竖排第一个应是右上角
+  assert.ok(boxes[0].x > boxes[1].x, '首格应在右侧');
+  assert.ok(Math.abs(boxes[0].y - boxes[1].y) < 1, '前两格同一行');
+});
+
+check('网格拟合：空白区域不产出字框', () => {
+  const W = 300;
+  const H = 200;
+  const ink = new Uint8Array(W * H);
+  // 只画左上角一个块
+  for (let y = 10; y < 90; y += 1) for (let x = 10; x < 90; x += 1) ink[y * W + x] = 1;
+  const boxes = buildGridBoxes(ink, W, H, 100, 'vertical');
+  assert.equal(boxes.length, 1, `实际 ${boxes.length}`);
 });
 
 console.log(`\n${passed} 项通过`);

@@ -199,6 +199,113 @@ const median = (values) => {
   return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
 };
 
+/**
+ * 用列投影的自相关估计「字距」（一个字占的宽度）
+ * 搜索范围限制在图宽的 8%~40%，避免锁到笔画级的周期性
+ */
+export const estimatePitch = (profile, minRatio = 0.08, maxRatio = 0.4) => {
+  const n = profile.length;
+  if (n < 8) return { pitch: 0, score: 0 };
+
+  let mean = 0;
+  for (let i = 0; i < n; i += 1) mean += profile[i];
+  mean /= n;
+
+  const centered = new Float32Array(n);
+  let variance = 0;
+  for (let i = 0; i < n; i += 1) {
+    centered[i] = profile[i] - mean;
+    variance += centered[i] * centered[i];
+  }
+  if (variance <= 0) return { pitch: 0, score: 0 };
+
+  const lo = Math.max(4, Math.round(n * minRatio));
+  const hi = Math.min(n - 2, Math.round(n * maxRatio));
+  let bestLag = 0;
+  let bestScore = -Infinity;
+
+  for (let lag = lo; lag <= hi; lag += 1) {
+    let sum = 0;
+    for (let i = 0; i + lag < n; i += 1) sum += centered[i] * centered[i + lag];
+    const score = sum / variance;
+    if (score > bestScore) {
+      bestScore = score;
+      bestLag = lag;
+    }
+  }
+  return { pitch: bestLag, score: bestScore };
+};
+
+/** 墨迹外接框（去掉四周留白） */
+const inkBounds = (ink, width, height) => {
+  let minX = width;
+  let maxX = -1;
+  let minY = height;
+  let maxY = -1;
+  for (let y = 0; y < height; y += 1) {
+    const rowStart = y * width;
+    for (let x = 0; x < width; x += 1) {
+      if (ink[rowStart + x]) {
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+    }
+  }
+  if (maxX < 0) return null;
+  return { x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1 };
+};
+
+/** 区域内的墨迹占比 */
+const inkCoverage = (ink, width, x0, y0, w, h) => {
+  const x1 = Math.min(width, Math.round(x0 + w));
+  const y1 = Math.round(y0 + h);
+  let inkCount = 0;
+  let total = 0;
+  for (let y = Math.max(0, Math.round(y0)); y < y1; y += 1) {
+    const rowStart = y * width;
+    for (let x = Math.max(0, Math.round(x0)); x < x1; x += 1) {
+      total += 1;
+      if (ink[rowStart + x]) inkCount += 1;
+    }
+  }
+  return total > 0 ? inkCount / total : 0;
+};
+
+/**
+ * 按字距拟合规则网格（用于字距过密、投影切不干净的字帖）
+ * 汉字接近方形，所以用列方向估出的字距同时作为行距
+ */
+export const buildGridBoxes = (ink, width, height, pitch, layout = 'vertical') => {
+  const bounds = inkBounds(ink, width, height);
+  if (!bounds || pitch <= 0) return [];
+
+  const columns = Math.max(1, Math.round(bounds.width / pitch));
+  const rows = Math.max(1, Math.round(bounds.height / pitch));
+  const cellWidth = bounds.width / columns;
+  const cellHeight = bounds.height / rows;
+
+  const boxes = [];
+  for (let r = 0; r < rows; r += 1) {
+    for (let c = 0; c < columns; c += 1) {
+      const x = bounds.x + c * cellWidth;
+      const y = bounds.y + r * cellHeight;
+      if (inkCoverage(ink, width, x, y, cellWidth, cellHeight) < 0.02) continue;
+      boxes.push({ x, y, width: cellWidth, height: cellHeight });
+    }
+  }
+
+  // 阅读顺序：竖排从右往左、横排从左往右
+  boxes.sort((a, b) => {
+    const rowDiff = Math.round((a.y - b.y) / Math.max(1, cellHeight * 0.5));
+    if (rowDiff !== 0) return rowDiff;
+    return layout === 'vertical' ? b.x - a.x : a.x - b.x;
+  });
+
+  return boxes;
+};
+
 /** 把明显偏大（多个字粘在一起）的字块按中位尺寸等分 */
 const splitOversized = (boxes, axis) => {
   if (boxes.length < 3) return boxes;
@@ -263,7 +370,7 @@ export const segmentCharacters = async (imageSrc, options = {}) => {
     return 'vertical';
   };
 
-  const layout = forcedLayout !== 'auto' ? forcedLayout : detectLayout();
+  let layout = forcedLayout !== 'auto' ? forcedLayout : detectLayout();
 
   const toSource = (box) => ({
     x: box.x / scale,
@@ -321,7 +428,31 @@ export const segmentCharacters = async (imageSrc, options = {}) => {
   // 过滤异常块（过大 = 整页被当成一个字；过小 = 噪点）
   const maxW = (W / scale) * MAX_SIZE_RATIO;
   const maxH = (H / scale) * MAX_SIZE_RATIO;
-  const usable = boxes.filter((box) => box.width <= maxW && box.height <= maxH && box.width > 4 && box.height > 4);
+  let usable = boxes.filter((box) => box.width <= maxW && box.height <= maxH && box.width > 4 && box.height > 4);
+
+  // 字距估计 + 退化检测：
+  // 字距过密时投影切不开（整列被当成一个字），此时改用规则网格拟合
+  const { pitch } = estimatePitch(projectColumns(ink, W, H));
+  let strategy = 'projection';
+  if (pitch > 0) {
+    const medianWidth = median(usable.map((box) => box.width / scale));
+    const medianHeight = median(usable.map((box) => box.height / scale));
+    const degenerate =
+      usable.length === 0 ||
+      medianWidth > pitch / scale * 1.8 ||
+      medianHeight > pitch / scale * 1.8;
+
+    if (degenerate) {
+      // 网格模式下投影判定已失效，回落到书法默认的竖排（用户可手动切换）
+      const gridLayout = forcedLayout !== 'auto' ? forcedLayout : 'vertical';
+      const gridBoxes = buildGridBoxes(ink, W, H, pitch, gridLayout).map(toSource);
+      if (gridBoxes.length > 0) {
+        usable = gridBoxes;
+        strategy = 'grid';
+        layout = gridLayout;
+      }
+    }
+  }
 
   if (usable.length === 0) {
     return { boxes: [], layout, columns: columnCount, scale, failed: true, reason: 'empty' };
@@ -331,6 +462,8 @@ export const segmentCharacters = async (imageSrc, options = {}) => {
     boxes: usable,
     layout,
     columns: columnCount,
+    strategy,
+    pitch: pitch / scale,
     scale,
     failed: false,
     charSize: {
