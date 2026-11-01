@@ -10,6 +10,12 @@
             "dev": "vite --host 0.0.0.0",
             "prebuild": "node scripts/fetch-ocr-assets.mjs",
             "build": "vite build",
+            "ios:copy": "npm run build && npx cap copy ios",
+            "ios:sync": "npm run build && npx cap sync ios",
+            "ios:open": "npm run build && npx cap sync ios && npx cap open ios",
+            "android:copy": "npm run build && npx cap copy android",
+            "android:sync": "npm run build && npx cap sync android",
+            "android:open": "npm run build && npx cap sync android && npx cap open android",
             "preview": "vite preview",
             "ocr:assets": "node scripts/fetch-ocr-assets.mjs",
             "ocr:assets:force": "node scripts/fetch-ocr-assets.mjs --force"
