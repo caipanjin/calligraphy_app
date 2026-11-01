@@ -167,9 +167,9 @@ const App = () => {
 
     // 显示最近图片列表
     setShowRecentImages(true);
-    
-    // 触发 OCR 识别
-    setShowOCR(true);
+
+    // 换图后关闭上一次的识别结果，避免展示与当前图片不匹配的面板
+    setShowOCR(false);
   };
   
   // 当前选中的字符信息
@@ -346,6 +346,18 @@ const App = () => {
   return (
     <div className="container">
       <h2>书法临摹助手</h2>
+
+      {/* 识别入口：改为按需触发，避免每次换图都跑一遍 OCR */}
+      {image && !selectedCharacter && (
+        <div className="action-bar">
+          <button
+            className="ocr-trigger-btn"
+            onClick={() => setShowOCR((visible) => !visible)}
+          >
+            {showOCR ? '收起识别结果' : '识别文字'}
+          </button>
+        </div>
+      )}
       
       {/* 最近图片列表组件 */}
       <RecentImages 

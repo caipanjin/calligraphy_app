@@ -1,5 +1,12 @@
-import React, { useState, useEffect } from 'react';
-import { preprocessImage, recognizeText, groupWordsByLine, mapBboxToSource } from '../utils/ocr';
+import React, { useState, useEffect, useCallback } from 'react';
+import {
+  preprocessImage,
+  recognizeText,
+  groupWordsByLine,
+  mapBboxToSource,
+  describeOcrError,
+  OCR_ERROR
+} from '../utils/ocr';
 
 const OCRResults = ({ image, onSelectCharacter, onClose }) => {
   const [ocrResult, setOcrResult] = useState(null);
@@ -7,6 +14,7 @@ const OCRResults = ({ image, onSelectCharacter, onClose }) => {
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState(null);
   const [imageSize, setImageSize] = useState({ width: 0, height: 0 });
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     if (!image) return;
@@ -18,6 +26,7 @@ const OCRResults = ({ image, onSelectCharacter, onClose }) => {
         setLoading(true);
         setError(null);
         setProgress(0);
+        setOcrResult(null);
 
         const img = new Image();
         img.src = image;
@@ -26,38 +35,52 @@ const OCRResults = ({ image, onSelectCharacter, onClose }) => {
           img.onerror = () => reject(new Error('图片加载失败'));
         });
 
-        if (!isCancelled) {
-          setImageSize({
-            width: img.naturalWidth || img.width,
-            height: img.naturalHeight || img.height
-          });
-        }
-
-        const { dataUrl, scale } = await preprocessImage(image);
-        
         if (isCancelled) return;
 
-        const result = await recognizeText(dataUrl, (p) => {
-          if (!isCancelled) setProgress(p);
+        setImageSize({
+          width: img.naturalWidth || img.width,
+          height: img.naturalHeight || img.height
         });
 
+        const { dataUrl, scale } = await preprocessImage(image);
+
         if (isCancelled) return;
 
-        if (result.words && result.words.length > 0) {
-          // 识别是在缩放后的预处理图上做的，bbox 需要回算到原图坐标系
-          const words = result.words.map((word) => ({
-            ...word,
-            bbox: mapBboxToSource(word.bbox, scale)
-          }));
-          const lines = groupWordsByLine(words, scale > 0 ? 20 / scale : 20);
-          setOcrResult({ words, lines, text: result.text });
-        } else {
-          setError('未识别到文字，请手动选择字符');
+        // 重试时跳过缓存，其余情况命中缓存可秒开
+        const result = await recognizeText(
+          dataUrl,
+          (percent) => {
+            if (!isCancelled) setProgress(percent);
+          },
+          { skipCache: attempt > 0 }
+        );
+
+        if (isCancelled) return;
+
+        if (!result.words || result.words.length === 0) {
+          setError({
+            kind: OCR_ERROR.NO_TEXT,
+            message: describeOcrError({ kind: OCR_ERROR.NO_TEXT })
+          });
+          return;
         }
+
+        // 识别是在缩放后的预处理图上做的，bbox 需要回算到原图坐标系
+        const words = result.words.map((word) => ({
+          ...word,
+          bbox: mapBboxToSource(word.bbox, scale)
+        }));
+        const lines = groupWordsByLine(words, scale > 0 ? 20 / scale : 20);
+        setOcrResult({ words, lines, text: result.text });
       } catch (err) {
         if (!isCancelled) {
-          setError('识别失败，请手动选择字符');
-          console.error('OCR Error:', err);
+          setError({
+            kind: (err && err.kind) || OCR_ERROR.UNKNOWN,
+            message: describeOcrError(err)
+          });
+          if (!err || !err.kind) {
+            console.error('OCR Error:', err);
+          }
         }
       } finally {
         if (!isCancelled) {
@@ -71,7 +94,11 @@ const OCRResults = ({ image, onSelectCharacter, onClose }) => {
     return () => {
       isCancelled = true;
     };
-  }, [image]);
+  }, [image, attempt]);
+
+  const handleRetry = useCallback(() => {
+    setAttempt((value) => value + 1);
+  }, []);
 
   const handleWordClick = (word) => {
     const { bbox } = word;
@@ -107,12 +134,14 @@ const OCRResults = ({ image, onSelectCharacter, onClose }) => {
             <div className="progress-fill" style={{ width: `${progress}%` }}></div>
           </div>
           <p>{progress}%</p>
+          <p className="ocr-hint">首次识别需加载本地语言包，可能稍慢</p>
         </div>
       </div>
     );
   }
 
   if (error) {
+    const retryable = error.kind !== OCR_ERROR.ASSET;
     return (
       <div className="ocr-results">
         <div className="ocr-header">
@@ -120,10 +149,17 @@ const OCRResults = ({ image, onSelectCharacter, onClose }) => {
           <button className="close-btn" onClick={onClose}>×</button>
         </div>
         <div className="ocr-error">
-          <p>{error}</p>
-          <button className="manual-btn" onClick={onClose}>
-            手动选择字符
-          </button>
+          <p>{error.message}</p>
+          <div className="ocr-error-actions">
+            {retryable && (
+              <button className="manual-btn" onClick={handleRetry}>
+                重新识别
+              </button>
+            )}
+            <button className="manual-btn secondary" onClick={onClose}>
+              手动选择字符
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -135,7 +171,12 @@ const OCRResults = ({ image, onSelectCharacter, onClose }) => {
     <div className="ocr-results">
       <div className="ocr-header">
         <h3>识别结果 ({ocrResult.words.length} 个文字)</h3>
-        <button className="close-btn" onClick={onClose}>×</button>
+        <div className="ocr-header-actions">
+          <button className="retry-btn" onClick={handleRetry} title="重新识别">
+            重试
+          </button>
+          <button className="close-btn" onClick={onClose}>×</button>
+        </div>
       </div>
       
       <div className="ocr-content">

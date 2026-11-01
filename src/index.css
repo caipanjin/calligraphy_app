@@ -183,3 +183,76 @@ body {
   color: white;
   border-color: #4CAF50;
 }
+
+/* 识别入口 / 面板补充样式 */
+
+.action-bar {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  margin: 12px 0;
+}
+
+.ocr-trigger-btn {
+  padding: 8px 20px;
+  font-size: 15px;
+  color: #fff;
+  background: #4CAF50;
+  border: none;
+  border-radius: 20px;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(76, 175, 80, 0.3);
+  transition: background 0.2s, transform 0.1s;
+}
+
+.ocr-trigger-btn:hover {
+  background: #43a047;
+}
+
+.ocr-trigger-btn:active {
+  transform: scale(0.97);
+}
+
+.ocr-hint {
+  margin-top: 8px;
+  font-size: 13px;
+  color: #999;
+}
+
+.ocr-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.retry-btn {
+  padding: 4px 12px;
+  font-size: 13px;
+  color: #4CAF50;
+  background: transparent;
+  border: 1px solid #4CAF50;
+  border-radius: 12px;
+  cursor: pointer;
+}
+
+.retry-btn:hover {
+  background: rgba(76, 175, 80, 0.1);
+}
+
+.ocr-error-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+
+.manual-btn.secondary {
+  background: #f5f5f5;
+  color: #666;
+  border: 1px solid #ddd;
+}
+
+.manual-btn.secondary:hover {
+  background: #eee;
+}
