@@ -20,6 +20,9 @@ build/
 # 忽略本地 agent 工具状态
 .pilotdeck/
 
+# OCR 离线资源由 scripts/fetch-ocr-assets.mjs 生成（约 12MB，不入库）
+public/tesseract/
+
 # 忽略测试报告和覆盖率报告
 coverage/
 reports/

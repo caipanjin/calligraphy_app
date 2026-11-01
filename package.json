@@ -5,9 +5,13 @@
       "type": "module",
       "scripts": {
             "start": "vite --host 0.0.0.0",
+            "predev": "node scripts/fetch-ocr-assets.mjs",
             "dev": "vite --host 0.0.0.0",
+            "prebuild": "node scripts/fetch-ocr-assets.mjs",
             "build": "vite build",
-            "preview": "vite preview"
+            "preview": "vite preview",
+            "ocr:assets": "node scripts/fetch-ocr-assets.mjs",
+            "ocr:assets:force": "node scripts/fetch-ocr-assets.mjs --force"
       },
       "dependencies": {
             "@capacitor/android": "^6.2.0",
