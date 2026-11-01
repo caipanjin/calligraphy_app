@@ -236,16 +236,77 @@ export const estimatePitch = (profile, minRatio = 0.08, maxRatio = 0.4) => {
   return { pitch: bestLag, score: bestScore };
 };
 
-/** 墨迹外接框（去掉四周留白） */
-const inkBounds = (ink, width, height) => {
-  let minX = width;
-  let maxX = -1;
-  let minY = height;
-  let maxY = -1;
+/**
+ * 墨迹外接框：按投影分位裁剪，忽略边缘阴影/杂质
+ * （直接用极值会被照片边缘的暗边污染，导致整张网格偏移）
+ */
+const inkBounds = (ink, width, height, ratio = 0.02) => {
+  const colSums = new Uint32Array(width);
+  const rowSums = new Uint32Array(height);
+  let maxCol = 0;
+  let maxRow = 0;
+
   for (let y = 0; y < height; y += 1) {
     const rowStart = y * width;
+    let rowSum = 0;
     for (let x = 0; x < width; x += 1) {
       if (ink[rowStart + x]) {
+        colSums[x] += 1;
+        rowSum += 1;
+      }
+    }
+    rowSums[y] = rowSum;
+    if (rowSum > maxRow) maxRow = rowSum;
+  }
+  for (let x = 0; x < width; x += 1) if (colSums[x] > maxCol) maxCol = colSums[x];
+  if (maxCol === 0 || maxRow === 0) return null;
+
+  const colThreshold = Math.max(1, maxCol * ratio);
+  const rowThreshold = Math.max(1, maxRow * ratio);
+
+  let minX = -1;
+  let maxX = -1;
+  let minY = -1;
+  let maxY = -1;
+  for (let x = 0; x < width; x += 1) {
+    if (colSums[x] >= colThreshold) {
+      if (minX < 0) minX = x;
+      maxX = x;
+    }
+  }
+  for (let y = 0; y < height; y += 1) {
+    if (rowSums[y] >= rowThreshold) {
+      if (minY < 0) minY = y;
+      maxY = y;
+    }
+  }
+  if (minX < 0 || minY < 0) return null;
+  return { x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1 };
+};
+
+/**
+ * 在给定格子内按真实墨迹重新定位并居中
+ * 网格只负责「大概在哪」，这个函数负责「字到底在哪、多大」
+ */
+const refineToGlyph = (ink, width, height, box, shrinkRatio = 0.08, marginRatio = 0.14) => {
+  const insetX = box.width * shrinkRatio;
+  const insetY = box.height * shrinkRatio;
+  const x0 = Math.max(0, Math.round(box.x + insetX));
+  const x1 = Math.min(width, Math.round(box.x + box.width - insetX));
+  const y0 = Math.max(0, Math.round(box.y + insetY));
+  const y1 = Math.min(height, Math.round(box.y + box.height - insetY));
+
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minY = Infinity;
+  let maxY = -Infinity;
+  let inkCount = 0;
+
+  for (let y = y0; y < y1; y += 1) {
+    const rowStart = y * width;
+    for (let x = x0; x < x1; x += 1) {
+      if (ink[rowStart + x]) {
+        inkCount += 1;
         if (x < minX) minX = x;
         if (x > maxX) maxX = x;
         if (y < minY) minY = y;
@@ -253,8 +314,26 @@ const inkBounds = (ink, width, height) => {
       }
     }
   }
-  if (maxX < 0) return null;
-  return { x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1 };
+
+  const area = Math.max(1, (x1 - x0) * (y1 - y0));
+  if (inkCount / area < 0.02 || maxX < 0) return null;
+
+  const glyphWidth = maxX - minX + 1;
+  const glyphHeight = maxY - minY + 1;
+  const centerX = (minX + maxX) / 2;
+  const centerY = (minY + maxY) / 2;
+  const size = Math.max(glyphWidth, glyphHeight) * (1 + marginRatio * 2);
+
+  // 不超过格子本身，避免压到邻格
+  const finalWidth = Math.min(box.width, size);
+  const finalHeight = Math.min(box.height, size);
+
+  return {
+    x: Math.min(Math.max(centerX - finalWidth / 2, box.x), box.x + box.width - finalWidth),
+    y: Math.min(Math.max(centerY - finalHeight / 2, box.y), box.y + box.height - finalHeight),
+    width: finalWidth,
+    height: finalHeight
+  };
 };
 
 /** 区域内的墨迹占比 */
@@ -274,6 +353,30 @@ const inkCoverage = (ink, width, x0, y0, w, h) => {
 };
 
 /**
+ * 用字距拆分过宽的带：宽度明显大于一个字距，说明这里有多个列/字粘在一起
+ */
+const splitBandsByPitch = (bands, pitch, factor = 1.6) => {
+  if (!pitch || pitch <= 0) return bands;
+  const result = [];
+  bands.forEach((band) => {
+    const size = band.end - band.start;
+    const parts = Math.round(size / pitch);
+    if (parts > 1 && size > pitch * factor) {
+      const step = size / parts;
+      for (let i = 0; i < parts; i += 1) {
+        result.push({
+          start: Math.round(band.start + i * step),
+          end: Math.round(band.start + (i + 1) * step)
+        });
+      }
+    } else {
+      result.push(band);
+    }
+  });
+  return result;
+};
+
+/**
  * 按字距拟合规则网格（用于字距过密、投影切不干净的字帖）
  * 汉字接近方形，所以用列方向估出的字距同时作为行距
  */
@@ -289,10 +392,16 @@ export const buildGridBoxes = (ink, width, height, pitch, layout = 'vertical') =
   const boxes = [];
   for (let r = 0; r < rows; r += 1) {
     for (let c = 0; c < columns; c += 1) {
-      const x = bounds.x + c * cellWidth;
-      const y = bounds.y + r * cellHeight;
-      if (inkCoverage(ink, width, x, y, cellWidth, cellHeight) < 0.02) continue;
-      boxes.push({ x, y, width: cellWidth, height: cellHeight });
+      const cell = {
+        x: bounds.x + c * cellWidth,
+        y: bounds.y + r * cellHeight,
+        width: cellWidth,
+        height: cellHeight
+      };
+      // 先粗判是否有墨，再按真实墨迹居中
+      if (inkCoverage(ink, width, cell.x, cell.y, cell.width, cell.height) < 0.02) continue;
+      const refined = refineToGlyph(ink, width, height, cell);
+      if (refined) boxes.push(refined);
     }
   }
 
@@ -347,11 +456,17 @@ export const segmentCharacters = async (imageSrc, options = {}) => {
   const minSizeCol = Math.max(2, Math.round(W * MIN_SIZE_RATIO));
   const minSizeRow = Math.max(2, Math.round(H * MIN_SIZE_RATIO));
 
-  const colBands = findBands(projectColumns(ink, W, H), {
+  const colProfile = projectColumns(ink, W, H);
+  const { pitch } = estimatePitch(colProfile);
+
+  // 列带先用投影找，再用字距把粘连的多列拆开
+  const rawColBands = findBands(colProfile, {
     relInk: INK_RATIO,
     minGap: gapCol,
     minSize: minSizeCol
   });
+  const colBands = splitBandsByPitch(rawColBands, pitch);
+
   const rowBands = findBands(projectRows(ink, W, H), {
     relInk: INK_RATIO,
     minGap: gapRow,
@@ -364,9 +479,11 @@ export const segmentCharacters = async (imageSrc, options = {}) => {
   // 3) 其余默认竖排（书法字帖的常态）
   // 判定只影响阅读顺序与标签，用户可在面板上手动切换
   const detectLayout = () => {
+    // 只有一列（多行）→ 竖排；只有一行（多列）→ 横排
     if (colBands.length === 1 && rowBands.length > 1) return 'vertical';
     if (rowBands.length === 1 && colBands.length > 1) return 'horizontal';
-    if (rowBands.length <= 2 && colBands.length >= 3) return 'horizontal';
+    // 其余一律按竖排（书法字帖的常态）。规则网格下两种解读切出的框相同，
+    // 只有阅读顺序不同，面板上可一键切换。
     return 'vertical';
   };
 
@@ -381,16 +498,21 @@ export const segmentCharacters = async (imageSrc, options = {}) => {
 
   let boxes = [];
   let columnCount = 0;
+  const columnDetail = [];
 
   if (layout === 'vertical') {
     columnCount = colBands.length;
     // 竖排从右往左读
     [...colBands].reverse().forEach((col) => {
-      const charBands = findBands(projectRows(ink, W, H, col.start, col.end), {
-        relInk: INK_RATIO,
-        minGap: gapRow,
-        minSize: minSizeRow
-      });
+      const charBands = splitBandsByPitch(
+        findBands(projectRows(ink, W, H, col.start, col.end), {
+          relInk: INK_RATIO,
+          minGap: gapRow,
+          minSize: minSizeRow
+        }),
+        pitch
+      );
+      columnDetail.push({ width: col.end - col.start, bands: charBands.length, sizes: charBands.map((b) => b.end - b.start) });
       charBands.forEach((band) => {
         boxes.push(
           toSource({
@@ -430,17 +552,36 @@ export const segmentCharacters = async (imageSrc, options = {}) => {
   const maxH = (H / scale) * MAX_SIZE_RATIO;
   let usable = boxes.filter((box) => box.width <= maxW && box.height <= maxH && box.width > 4 && box.height > 4);
 
+  // 过滤碎片：明显小于中位字块的（通常是贴边被截断的半行或噪点）
+  if (usable.length >= 5) {
+    const medianW = median(usable.map((box) => box.width));
+    const medianH = median(usable.map((box) => box.height));
+    usable = usable.filter(
+      (box) => box.width >= medianW * 0.35 && box.height >= medianH * 0.45
+    );
+  }
+
   // 字距估计 + 退化检测：
   // 字距过密时投影切不开（整列被当成一个字），此时改用规则网格拟合
-  const { pitch } = estimatePitch(projectColumns(ink, W, H));
   let strategy = 'projection';
+  const debug = {
+    projectionBoxes: usable.length,
+    medianWidth: Math.round(median(usable.map((b) => b.width))),
+    medianHeight: Math.round(median(usable.map((b) => b.height))),
+    pitchInSource: Math.round(pitch / scale),
+    columns: colBands.length,
+    rawColumns: rawColBands.length,
+    columnDetail
+  };
   if (pitch > 0) {
-    const medianWidth = median(usable.map((box) => box.width / scale));
-    const medianHeight = median(usable.map((box) => box.height / scale));
+    // 注意：usable 里的框已经是原图坐标（toSource 转过），字距也要换算到原图尺度
+    const pitchInSource = pitch / scale;
+    const medianWidth = median(usable.map((box) => box.width));
+    const medianHeight = median(usable.map((box) => box.height));
     const degenerate =
       usable.length === 0 ||
-      medianWidth > pitch / scale * 1.8 ||
-      medianHeight > pitch / scale * 1.8;
+      medianWidth > pitchInSource * 1.8 ||
+      medianHeight > pitchInSource * 1.8;
 
     if (degenerate) {
       // 网格模式下投影判定已失效，回落到书法默认的竖排（用户可手动切换）
@@ -463,6 +604,7 @@ export const segmentCharacters = async (imageSrc, options = {}) => {
     layout,
     columns: columnCount,
     strategy,
+    debug,
     pitch: pitch / scale,
     scale,
     failed: false,
