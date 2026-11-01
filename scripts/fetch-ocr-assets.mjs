@@ -38,10 +38,9 @@ const copies = [
   }
 ];
 
-const downloads = [
-  { lang: 'chi_sim', minSize: 500 * 1024 },
-  { lang: 'eng', minSize: 500 * 1024 }
-];
+// 只保留简体中文：加入 eng 会让 tesseract 在中文失败时回退成拉丁字母，
+// 出现「毛笔字识别成一串英文」的现象（实测见 openspec/changes/ocr-accuracy-tuning.md）
+const downloads = [{ lang: 'chi_sim', minSize: 500 * 1024 }];
 
 const needsWork = (file, minSize) => force || !existsSync(file) || statSync(file).size < minSize;
 

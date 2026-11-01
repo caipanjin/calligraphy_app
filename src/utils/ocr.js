@@ -13,8 +13,10 @@ import { createWorker } from 'tesseract.js';
  */
 
 const ASSET_BASE = `${import.meta.env.BASE_URL}tesseract`;
-const OCR_LANGS = 'chi_sim+eng';
+const OCR_LANGS = 'chi_sim';
 const RECOGNIZE_TIMEOUT_MS = 120000;
+// 版面切分模式：6=单块文本，10=单字符。tesseract 默认 3 在书法图上几乎不出字
+const DEFAULT_PSM = '6';
 const WORKER_INIT_TIMEOUT_MS = 90000;
 const MAX_CACHE_ENTRIES = 8;
 
@@ -65,6 +67,7 @@ const withTimeout = (promise, timeoutMs) =>
 
 let workerPromise = null;
 let progressHandler = null;
+let workerPsm = null;
 
 const createOcrWorker = async () => {
   const worker = await createWorker(OCR_LANGS, 1, {
@@ -105,6 +108,7 @@ export const resetOcrWorker = () => {
   const current = workerPromise;
   workerPromise = null;
   progressHandler = null;
+  workerPsm = null;
   if (current) {
     current
       .then((worker) => worker.terminate())
@@ -241,8 +245,8 @@ export const preprocessImage = (imageData) => {
  * @param {{skipCache?: boolean, timeoutMs?: number}} [options]
  */
 export const recognizeText = (imageData, onProgress, options = {}) => {
-  const { skipCache = false, timeoutMs = RECOGNIZE_TIMEOUT_MS } = options;
-  const cacheKey = `${OCR_LANGS}:${hashImageData(imageData)}`;
+  const { skipCache = false, timeoutMs = RECOGNIZE_TIMEOUT_MS, psm = DEFAULT_PSM } = options;
+  const cacheKey = `${OCR_LANGS}:${psm}:${hashImageData(imageData)}`;
 
   if (!skipCache && resultCache.has(cacheKey)) {
     if (onProgress) onProgress(100);
@@ -251,6 +255,10 @@ export const recognizeText = (imageData, onProgress, options = {}) => {
 
   return enqueue(async () => {
     const worker = await getOcrWorker();
+    if (String(psm) !== workerPsm) {
+      await worker.setParameters({ tessedit_pageseg_mode: String(psm) });
+      workerPsm = String(psm);
+    }
     progressHandler = onProgress || null;
     try {
       const recognizeTask = worker.recognize(imageData);

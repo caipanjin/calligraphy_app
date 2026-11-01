@@ -1010,6 +1010,26 @@ button {
   letter-spacing: 0.04em;
 }
 
+/* OCR 低置信度提示 */
+.ocr-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  background: var(--accent-soft);
+  color: var(--ink-2);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.ocr-notice svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: var(--accent);
+}
+
 /* OCR 结果 */
 .ocr-preview {
   position: relative;

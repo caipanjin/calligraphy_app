@@ -23,6 +23,7 @@ const OCRSheet = ({ image, onSelectCharacter, onClose }) => {
   const [imageSize, setImageSize] = useState({ width: 0, height: 0 });
   const [errorMessage, setErrorMessage] = useState('');
   const [errorKind, setErrorKind] = useState(null);
+  const [avgConfidence, setAvgConfidence] = useState(0);
   const [tab, setTab] = useState('text');
   const [attempt, setAttempt] = useState(0);
 
@@ -76,6 +77,15 @@ const OCRSheet = ({ image, onSelectCharacter, onClose }) => {
           ...word,
           bbox: mapBboxToSource(word.bbox, scale)
         }));
+
+        const confidenceValues = mapped
+          .map((word) => (typeof word.confidence === 'number' ? word.confidence : 0))
+          .filter((value) => value > 0);
+        setAvgConfidence(
+          confidenceValues.length
+            ? Math.round(confidenceValues.reduce((sum, value) => sum + value, 0) / confidenceValues.length)
+            : 0
+        );
 
         setWords(mapped);
         setLines(groupWordsByLine(mapped, scale > 0 ? 20 / scale : 20));
@@ -138,7 +148,7 @@ const OCRSheet = ({ image, onSelectCharacter, onClose }) => {
             文字识别
             {status === 'done' && (
               <span className="section-head__hint" style={{ marginLeft: 8 }}>
-                {words.length} 字
+                {words.length} 字 · 置信度 {avgConfidence}%
               </span>
             )}
           </h3>
@@ -181,6 +191,15 @@ const OCRSheet = ({ image, onSelectCharacter, onClose }) => {
 
           {status === 'done' && (
             <>
+              {avgConfidence < 75 && (
+                <div className="ocr-notice">
+                  <FaExclamationTriangle size={12} />
+                  <span>
+                    识别置信度 {avgConfidence}%。毛笔字与印刷体差异较大，结果仅供参考，建议直接点选单字临摹。
+                  </span>
+                </div>
+              )}
+
               <div className="segmented">
                 <button
                   className={`segmented__item${tab === 'text' ? ' segmented__item--active' : ''}`}
