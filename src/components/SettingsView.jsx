@@ -1,0 +1,101 @@
+import React from 'react';
+import { FaTrashAlt, FaInfoCircle, FaRegLightbulb } from 'react-icons/fa';
+
+const THEME_OPTIONS = [
+  { value: 'auto', label: '跟随系统' },
+  { value: 'light', label: '浅色' },
+  { value: 'dark', label: '深色' }
+];
+
+/** 设置页：外观与数据 */
+const SettingsView = ({ theme, onChangeTheme, stickerCount, maxStickers, onClearAll }) => {
+  return (
+    <>
+      <div className="settings-group">
+        <h2 className="settings-group__title">外观</h2>
+        <div className="settings-card">
+          <div className="settings-row">
+            <span className="settings-row__label">显示模式</span>
+            <div className="settings-segmented">
+              {THEME_OPTIONS.map((option) => (
+                <button
+                  key={option.value}
+                  className={theme === option.value ? 'is-active' : ''}
+                  onClick={() => onChangeTheme(option.value)}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="settings-group">
+        <h2 className="settings-group__title">数据</h2>
+        <div className="settings-card">
+          <div className="settings-row">
+            <span className="settings-row__label">已保存字帖</span>
+            <span className="settings-row__value">
+              {stickerCount} / {maxStickers}
+            </span>
+          </div>
+          <button className="settings-row" onClick={onClearAll} disabled={stickerCount === 0}>
+            <FaTrashAlt size={14} style={{ color: stickerCount === 0 ? 'var(--ink-3)' : 'var(--accent)' }} />
+            <span
+              className="settings-row__label"
+              style={{ color: stickerCount === 0 ? 'var(--ink-3)' : 'var(--accent)' }}
+            >
+              清空全部字帖
+            </span>
+          </button>
+        </div>
+      </div>
+
+      <div className="settings-group">
+        <h2 className="settings-group__title">关于</h2>
+        <div className="settings-card">
+          <div className="settings-row">
+            <FaInfoCircle size={14} style={{ color: 'var(--ink-3)' }} />
+            <span className="settings-row__label">版本</span>
+            <span className="settings-row__value">0.1.0</span>
+          </div>
+          <div className="settings-row">
+            <FaRegLightbulb size={14} style={{ color: 'var(--ink-3)' }} />
+            <span className="settings-row__label">文字识别</span>
+            <span className="settings-row__value">离线引擎</span>
+          </div>
+          <div className="settings-row" style={{ alignItems: 'flex-start' }}>
+            <span className="settings-row__label" style={{ fontSize: 12.5, lineHeight: 1.7, color: 'var(--ink-3)' }}>
+              字帖与设置保存在本机浏览器存储（IndexedDB），不上传服务器。
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <div className="settings-group">
+        <h2 className="settings-group__title">快捷键（桌面端）</h2>
+        <div className="settings-card">
+          <div className="settings-row">
+            <span className="settings-row__label" style={{ fontSize: 13 }}>方向键</span>
+            <span className="settings-row__value">微调单字位置</span>
+          </div>
+          <div className="settings-row">
+            <span className="settings-row__label" style={{ fontSize: 13 }}>+ / −</span>
+            <span className="settings-row__value">放大 / 缩小</span>
+          </div>
+          <div className="settings-row">
+            <span className="settings-row__label" style={{ fontSize: 13 }}>PageUp / PageDown</span>
+            <span className="settings-row__value">上 / 下一个字</span>
+          </div>
+          <div className="settings-row">
+            <span className="settings-row__label" style={{ fontSize: 13 }}>Esc</span>
+            <span className="settings-row__value">返回完整图片</span>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+};
+
+export default SettingsView;

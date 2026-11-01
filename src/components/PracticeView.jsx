@@ -1,0 +1,478 @@
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { Magnifier } from 'react-image-magnifiers';
+import {
+  FaChevronLeft,
+  FaChevronUp,
+  FaChevronDown,
+  FaChevronRight,
+  FaSearchPlus,
+  FaSearchMinus,
+  FaAlignLeft,
+  FaImages,
+  FaArrowsAlt,
+  FaRegHandPointer
+} from 'react-icons/fa';
+import {
+  getCharacterNeighborhood,
+  getNextCharacterPosition,
+  getPreviousCharacterPosition,
+  isHiddenPosition
+} from '../utils/charNav';
+
+// 缩放因子
+const ZOOM_FACTOR = 1.05;
+// 微调步长（图片坐标系像素）
+const ADJUST_STEP = 2;
+// 单字框默认宽度占图片宽度的比例
+const CHAR_WIDTH_RATIO = 0.25;
+// 单字框最小高度比例
+const MIN_CHAR_HEIGHT_RATIO = 0.1;
+// 单字框最小缩放限制（占图片短边比例）
+const MIN_ZOOM_RATIO = 0.02;
+
+const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
+
+/** 把 viewBox 限制在图片范围内，并限制缩放上下限 */
+const fitViewBox = (viewBox, imageWidth, imageHeight) => {
+  const minWidth = Math.max(1, imageWidth * MIN_ZOOM_RATIO);
+  const minHeight = Math.max(1, imageHeight * MIN_ZOOM_RATIO);
+  const width = clamp(viewBox.width, minWidth, imageWidth);
+  const height = clamp(viewBox.height, minHeight, imageHeight);
+  return {
+    width,
+    height,
+    x: clamp(viewBox.x, 0, Math.max(0, imageWidth - width)),
+    y: clamp(viewBox.y, 0, Math.max(0, imageHeight - height))
+  };
+};
+
+const touchDistance = (touches) => {
+  const [a, b] = touches;
+  const distance = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+  return distance || 1;
+};
+
+/**
+ * 临摹页：图片模式（点选单字）与单字模式（拖动 / 双指缩放 / 导航）
+ */
+const PracticeView = ({ image, title, selectedCharacter, setSelectedCharacter, onBack, onOpenOCR }) => {
+  const frameRef = useRef(null);
+  const canvasRef = useRef(null);
+  const gestureRef = useRef({ mode: 'none', x: 0, y: 0 });
+  const pinchRef = useRef(null);
+
+  const [dragging, setDragging] = useState(false);
+  const [showDpad, setShowDpad] = useState(false);
+
+  const isCharMode = Boolean(selectedCharacter);
+
+  const exitCharMode = useCallback(() => {
+    setSelectedCharacter(null);
+    setShowDpad(false);
+  }, [setSelectedCharacter]);
+
+  /* ---------------- 图片模式：点选单字 ---------------- */
+
+  const handleStageClick = (event) => {
+    const frame = frameRef.current;
+    if (!frame) return;
+    const img = frame.querySelector('img');
+    if (!img) return;
+
+    const rect = img.getBoundingClientRect();
+    if (!rect.width || !rect.height) return;
+
+    const naturalWidth = img.naturalWidth || rect.width;
+    const naturalHeight = img.naturalHeight || rect.height;
+    const scaleX = naturalWidth / rect.width;
+    const scaleY = naturalHeight / rect.height;
+
+    const clickX = event.clientX - rect.left;
+    const clickY = event.clientY - rect.top;
+
+    // 先在屏幕像素下算一个近似正方形的框，再换算到图片坐标
+    const cssWidth = rect.width * CHAR_WIDTH_RATIO;
+    const cssHeight = Math.max(cssWidth, rect.height * MIN_CHAR_HEIGHT_RATIO);
+
+    const viewBox = fitViewBox(
+      {
+        x: (clickX - cssWidth / 2) * scaleX,
+        y: (clickY - cssHeight / 2) * scaleY,
+        width: cssWidth * scaleX,
+        height: cssHeight * scaleY
+      },
+      naturalWidth,
+      naturalHeight
+    );
+
+    setSelectedCharacter({
+      src: image,
+      width: naturalWidth,
+      height: naturalHeight,
+      viewBox
+    });
+  };
+
+  /* ---------------- 单字模式：视图变换 ---------------- */
+
+  const applyViewBox = useCallback(
+    (updater) => {
+      setSelectedCharacter((prev) => {
+        if (!prev) return prev;
+        return { ...prev, viewBox: fitViewBox(updater(prev.viewBox), prev.width, prev.height) };
+      });
+    },
+    [setSelectedCharacter]
+  );
+
+  const adjust = useCallback(
+    (dx, dy) => {
+      applyViewBox((viewBox) => ({ ...viewBox, x: viewBox.x + dx, y: viewBox.y + dy }));
+    },
+    [applyViewBox]
+  );
+
+  const zoom = useCallback(
+    (zoomIn) => {
+      applyViewBox((viewBox) => {
+        const factor = zoomIn ? 1 / ZOOM_FACTOR : ZOOM_FACTOR;
+        const width = viewBox.width * factor;
+        const height = viewBox.height * factor;
+        const centerX = viewBox.x + viewBox.width / 2;
+        const centerY = viewBox.y + viewBox.height / 2;
+        return { x: centerX - width / 2, y: centerY - height / 2, width, height };
+      });
+    },
+    [applyViewBox]
+  );
+
+  const goNext = useCallback(() => {
+    if (!selectedCharacter) return;
+    const position = getNextCharacterPosition(
+      selectedCharacter,
+      selectedCharacter.viewBox.x,
+      selectedCharacter.viewBox.y,
+      1
+    );
+    if (isHiddenPosition(position)) return;
+    applyViewBox((viewBox) => ({ ...viewBox, x: position.x, y: position.y }));
+  }, [applyViewBox, selectedCharacter]);
+
+  const goPrev = useCallback(() => {
+    if (!selectedCharacter) return;
+    const position = getPreviousCharacterPosition(
+      selectedCharacter,
+      selectedCharacter.viewBox.x,
+      selectedCharacter.viewBox.y,
+      1
+    );
+    if (isHiddenPosition(position)) return;
+    applyViewBox((viewBox) => ({ ...viewBox, x: position.x, y: position.y }));
+  }, [applyViewBox, selectedCharacter]);
+
+  /* ---------------- 鼠标 / 触摸手势 ---------------- */
+
+  const dragBy = useCallback(
+    (dxPx, dyPx) => {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const rect = canvas.getBoundingClientRect();
+      if (!rect.width || !rect.height) return;
+      applyViewBox((viewBox) => ({
+        ...viewBox,
+        x: viewBox.x - (dxPx * viewBox.width) / rect.width,
+        y: viewBox.y - (dyPx * viewBox.height) / rect.height
+      }));
+    },
+    [applyViewBox]
+  );
+
+  const handleMouseDown = (event) => {
+    gestureRef.current = { mode: 'drag', x: event.clientX, y: event.clientY };
+    setDragging(true);
+  };
+
+  const handleMouseMove = (event) => {
+    if (gestureRef.current.mode !== 'drag') return;
+    dragBy(event.clientX - gestureRef.current.x, event.clientY - gestureRef.current.y);
+    gestureRef.current.x = event.clientX;
+    gestureRef.current.y = event.clientY;
+  };
+
+  const endGesture = useCallback(() => {
+    gestureRef.current = { mode: 'none', x: 0, y: 0 };
+    pinchRef.current = null;
+    setDragging(false);
+  }, []);
+
+  const beginPinch = (touches) => {
+    const viewBox = selectedCharacter.viewBox;
+    pinchRef.current = {
+      distance: touchDistance(touches),
+      centerX: viewBox.x + viewBox.width / 2,
+      centerY: viewBox.y + viewBox.height / 2,
+      width: viewBox.width,
+      height: viewBox.height
+    };
+  };
+
+  const updatePinch = (touches) => {
+    const pinch = pinchRef.current;
+    if (!pinch) return;
+    const ratio = touchDistance(touches) / pinch.distance;
+    const width = pinch.width / ratio;
+    const height = pinch.height / ratio;
+    setSelectedCharacter((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        viewBox: fitViewBox(
+          {
+            x: pinch.centerX - width / 2,
+            y: pinch.centerY - height / 2,
+            width,
+            height
+          },
+          prev.width,
+          prev.height
+        )
+      };
+    });
+  };
+
+  const handleTouchStart = (event) => {
+    if (event.touches.length >= 2) {
+      beginPinch(event.touches);
+      gestureRef.current = { mode: 'pinch', x: 0, y: 0 };
+      return;
+    }
+    const touch = event.touches[0];
+    gestureRef.current = { mode: 'drag', x: touch.clientX, y: touch.clientY };
+    setDragging(true);
+  };
+
+  const handleTouchMove = (event) => {
+    if (event.touches.length >= 2) {
+      if (gestureRef.current.mode !== 'pinch') beginPinch(event.touches);
+      gestureRef.current = { mode: 'pinch', x: 0, y: 0 };
+      updatePinch(event.touches);
+      event.preventDefault();
+      return;
+    }
+
+    if (gestureRef.current.mode === 'pinch') {
+      // 双指抬起一指后，用剩余手指继续拖动
+      pinchRef.current = null;
+      const touch = event.touches[0];
+      gestureRef.current = { mode: 'drag', x: touch.clientX, y: touch.clientY };
+      return;
+    }
+
+    if (gestureRef.current.mode !== 'drag') return;
+    const touch = event.touches[0];
+    dragBy(touch.clientX - gestureRef.current.x, touch.clientY - gestureRef.current.y);
+    gestureRef.current.x = touch.clientX;
+    gestureRef.current.y = touch.clientY;
+    event.preventDefault();
+  };
+
+  const handleTouchEnd = (event) => {
+    if (event.touches.length === 0) {
+      endGesture();
+      return;
+    }
+    pinchRef.current = null;
+    const touch = event.touches[0];
+    gestureRef.current = { mode: 'drag', x: touch.clientX, y: touch.clientY };
+  };
+
+  /* ---------------- 键盘快捷键（桌面端） ---------------- */
+
+  useEffect(() => {
+    if (!isCharMode) return undefined;
+
+    const handlers = {
+      ArrowUp: () => adjust(0, -ADJUST_STEP),
+      ArrowDown: () => adjust(0, ADJUST_STEP),
+      ArrowLeft: () => adjust(-ADJUST_STEP, 0),
+      ArrowRight: () => adjust(ADJUST_STEP, 0),
+      '+': () => zoom(true),
+      '=': () => zoom(true),
+      '-': () => zoom(false),
+      PageDown: goNext,
+      PageUp: goPrev,
+      Escape: exitCharMode
+    };
+
+    const onKeyDown = (event) => {
+      const handler = handlers[event.key];
+      if (!handler) return;
+      event.preventDefault();
+      handler();
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [isCharMode, adjust, zoom, goNext, goPrev, exitCharMode]);
+
+  /* ---------------- 渲染 ---------------- */
+
+  const neighborhood = selectedCharacter ? getCharacterNeighborhood(selectedCharacter) : [];
+
+  return (
+    <div className="practice">
+      <div className="practice__bar">
+        <button
+          className="icon-btn"
+          onClick={isCharMode ? exitCharMode : onBack}
+          aria-label={isCharMode ? '返回完整图片' : '返回字帖库'}
+        >
+          <FaChevronLeft size={17} />
+        </button>
+        <div className="practice__bar-title">{isCharMode ? '单字临摹' : title || '临摹'}</div>
+        {isCharMode ? (
+          <button className="icon-btn" onClick={onBack} aria-label="返回字帖库">
+            <FaImages size={16} />
+          </button>
+        ) : (
+          <button className="icon-btn icon-btn--accent" onClick={onOpenOCR} aria-label="识别文字">
+            <FaAlignLeft size={16} />
+          </button>
+        )}
+      </div>
+
+      {!isCharMode && (
+        <div className="practice__stage">
+          <div className="stage-frame" ref={frameRef}>
+            <Magnifier
+              imageSrc={image}
+              largeImageSrc={image}
+              imageAlt="字帖"
+              style={{ width: '100%', height: 'auto' }}
+            />
+            <div className="stage-hotspot" onClick={handleStageClick} role="button" tabIndex={0} aria-label="点选单字" />
+            <div className="stage-hint">
+              <FaRegHandPointer size={11} />
+              轻触选择要临摹的字
+            </div>
+          </div>
+        </div>
+      )}
+
+      {isCharMode && (
+        <div className="char-view">
+          <div className="practice__stage">
+            <div
+              className="char-canvas"
+              ref={canvasRef}
+              onMouseDown={handleMouseDown}
+              onMouseMove={handleMouseMove}
+              onMouseUp={endGesture}
+              onMouseLeave={endGesture}
+              onTouchStart={handleTouchStart}
+              onTouchMove={handleTouchMove}
+              onTouchEnd={handleTouchEnd}
+              onTouchCancel={handleTouchEnd}
+            >
+              <svg
+                viewBox={`${selectedCharacter.viewBox.x} ${selectedCharacter.viewBox.y} ${selectedCharacter.viewBox.width} ${selectedCharacter.viewBox.height}`}
+                preserveAspectRatio="xMidYMid meet"
+              >
+                <image
+                  href={selectedCharacter.src}
+                  width={selectedCharacter.width}
+                  height={selectedCharacter.height}
+                />
+              </svg>
+              <div className="char-canvas__grid" aria-hidden="true" />
+            </div>
+          </div>
+
+          <div className="char-strip">
+            {neighborhood.map((position, index) => {
+              const hidden = isHiddenPosition(position);
+              const active =
+                position.x === selectedCharacter.viewBox.x && position.y === selectedCharacter.viewBox.y;
+              return (
+                <button
+                  key={index}
+                  className={`char-thumb${active ? ' char-thumb--active' : ''}${
+                    hidden ? ' char-thumb--empty' : ''
+                  }`}
+                  onClick={() =>
+                    !hidden && applyViewBox((viewBox) => ({ ...viewBox, x: position.x, y: position.y }))
+                  }
+                  disabled={hidden}
+                  aria-label={active ? '当前字' : '跳转到相邻字'}
+                >
+                  <svg
+                    viewBox={`${position.x} ${position.y} ${selectedCharacter.viewBox.width} ${selectedCharacter.viewBox.height}`}
+                    preserveAspectRatio="xMidYMid meet"
+                  >
+                    <image
+                      href={selectedCharacter.src}
+                      width={selectedCharacter.width}
+                      height={selectedCharacter.height}
+                    />
+                  </svg>
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="dock">
+            {showDpad && (
+              <div className="dpad">
+                <div />
+                <button className="dpad__btn" onClick={() => adjust(0, -ADJUST_STEP)} aria-label="上移">
+                  <FaChevronUp size={15} />
+                </button>
+                <div />
+                <button className="dpad__btn" onClick={() => adjust(-ADJUST_STEP, 0)} aria-label="左移">
+                  <FaChevronLeft size={15} />
+                </button>
+                <div className="dpad__center">微调</div>
+                <button className="dpad__btn" onClick={() => adjust(ADJUST_STEP, 0)} aria-label="右移">
+                  <FaChevronRight size={15} />
+                </button>
+                <div />
+                <button className="dpad__btn" onClick={() => adjust(0, ADJUST_STEP)} aria-label="下移">
+                  <FaChevronDown size={15} />
+                </button>
+                <div />
+              </div>
+            )}
+
+            <div className="dock__row">
+              <button className="dock-btn" onClick={goPrev}>
+                <FaChevronUp />
+                <span>上一字</span>
+              </button>
+              <button className="dock-btn" onClick={() => zoom(false)}>
+                <FaSearchMinus />
+                <span>缩小</span>
+              </button>
+              <button
+                className={`dock-btn${showDpad ? ' dock-btn--active' : ''}`}
+                onClick={() => setShowDpad((visible) => !visible)}
+              >
+                <FaArrowsAlt />
+                <span>微调</span>
+              </button>
+              <button className="dock-btn" onClick={() => zoom(true)}>
+                <FaSearchPlus />
+                <span>放大</span>
+              </button>
+              <button className="dock-btn" onClick={goNext}>
+                <FaChevronDown />
+                <span>下一字</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default PracticeView;

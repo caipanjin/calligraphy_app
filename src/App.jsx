@@ -1,402 +1,424 @@
-// 导入 React 核心库和常用钩子
-import React, { useState, useRef, useEffect, useCallback } from 'react';
-// 导入图片放大组件
-import { Magnifier } from 'react-image-magnifiers';
-// 导入样式文件
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import './index.css';
-// 导入自定义组件
-import RecentImages from './components/RecentImages';
-import ImageViewer from './components/ImageViewer';
-import CharacterSelector from './components/CharacterSelector';
-import OCRResults from './components/OCRResults';
+import Library, { MAX_STICKERS } from './components/Library';
+import PracticeView from './components/PracticeView';
+import OCRSheet from './components/OCRSheet';
+import SettingsView from './components/SettingsView';
+import Toast from './components/Toast';
+import { FaImages, FaCog, FaPlus } from 'react-icons/fa';
+
+const DB_NAME = 'calligraphyImages';
+const DB_VERSION = 1;
+const STORE_NAME = 'images';
+const THEME_STORAGE_KEY = 'calligraphy:theme';
+const TOAST_DURATION = 2200;
+const SUPPORTED_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+
+const readFileAsDataUrl = (file) =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(new Error('读取失败'));
+    reader.onabort = () => reject(new Error('读取中止'));
+    reader.readAsDataURL(file);
+  });
+
+const isValidImageDataUrl = (dataUrl) => {
+  if (typeof dataUrl !== 'string' || !dataUrl.startsWith('data:')) return false;
+  const parts = dataUrl.split(',');
+  if (parts.length < 2) return false;
+  const base64 = parts[1];
+  return Boolean(base64) && base64.length >= 100 && /^[A-Za-z0-9+/=]+$/.test(base64);
+};
+
+/** 把某张字帖提到列表最前，并裁剪到上限 */
+const promoteRecent = (list, item) => {
+  const rest = list.filter((entry) => entry.url !== item.url);
+  return [item, ...rest].slice(0, MAX_STICKERS);
+};
 
 const App = () => {
-  // 初始化IndexedDB
   const [db, setDb] = useState(null);
+  const [image, setImage] = useState(null);
+  const [recentImages, setRecentImages] = useState([]);
+  const [tab, setTab] = useState('library');
+  const [mode, setMode] = useState('library');
+  const [selectedCharacter, setSelectedCharacter] = useState(null);
+  const [showOCR, setShowOCR] = useState(false);
+  const [deleteIndex, setDeleteIndex] = useState(null);
+  const [toast, setToast] = useState('');
+  const [theme, setTheme] = useState(() => {
+    try {
+      return localStorage.getItem(THEME_STORAGE_KEY) || 'auto';
+    } catch (error) {
+      return 'auto';
+    }
+  });
+  const [headerScrolled, setHeaderScrolled] = useState(false);
+
+  const recentRef = useRef([]);
+  const toastTimerRef = useRef(null);
+  const fileInputRef = useRef(null);
+
+  /* ---------------- 轻提示 ---------------- */
+
+  const showToast = useCallback((message) => {
+    setToast(message);
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = setTimeout(() => setToast(''), TOAST_DURATION);
+  }, []);
+
+  useEffect(
+    () => () => {
+      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    },
+    []
+  );
+
+  /* ---------------- 主题 ---------------- */
 
   useEffect(() => {
-    // 检查IndexedDB是否可用
-    if (!('indexedDB' in window)) {
-      console.error('IndexedDB is not supported');
-      return;
+    const media = window.matchMedia('(prefers-color-scheme: dark)');
+
+    const apply = () => {
+      const resolved = theme === 'auto' ? (media.matches ? 'dark' : 'light') : theme;
+      document.documentElement.dataset.theme = resolved;
+      const meta = document.querySelector('meta[name="theme-color"]');
+      if (meta) meta.setAttribute('content', resolved === 'dark' ? '#14130f' : '#f4efe6');
+    };
+
+    apply();
+    try {
+      localStorage.setItem(THEME_STORAGE_KEY, theme);
+    } catch (error) {
+      /* 忽略隐私模式下的写入失败 */
     }
 
-    const request = indexedDB.open('calligraphyImages', 1);
-    
+    if (theme !== 'auto') return undefined;
+    media.addEventListener('change', apply);
+    return () => media.removeEventListener('change', apply);
+  }, [theme]);
+
+  /* ---------------- IndexedDB ---------------- */
+
+  useEffect(() => {
+    if (!('indexedDB' in window)) {
+      showToast('当前浏览器不支持本地存储');
+      return undefined;
+    }
+
+    let retryTimer = null;
+
+    const request = indexedDB.open(DB_NAME, DB_VERSION);
+
     request.onupgradeneeded = (event) => {
-      const db = event.target.result;
-      try {
-        if (!db.objectStoreNames.contains('images')) {
-          db.createObjectStore('images', { keyPath: 'id' });
-        }
-      } catch (error) {
-        console.error('IndexedDB upgrade error:', error);
+      const database = event.target.result;
+      if (!database.objectStoreNames.contains(STORE_NAME)) {
+        database.createObjectStore(STORE_NAME, { keyPath: 'id' });
       }
     };
 
-    request.onsuccess = (event) => {
-      try {
-        setDb(event.target.result);
-      } catch (error) {
-        console.error('IndexedDB connection error:', error);
-      }
-    };
+    request.onsuccess = (event) => setDb(event.target.result);
 
     request.onerror = (event) => {
       console.error('IndexedDB error:', event.target.error);
-      // 尝试重新连接
-      setTimeout(() => {
-        const retryRequest = indexedDB.open('calligraphyImages', 1);
-        retryRequest.onsuccess = (e) => setDb(e.target.result);
+      retryTimer = setTimeout(() => {
+        const retry = indexedDB.open(DB_NAME, DB_VERSION);
+        retry.onsuccess = (e) => setDb(e.target.result);
       }, 1000);
     };
 
-    // 处理数据库关闭
-    request.onblocked = () => {
-      console.warn('IndexedDB connection blocked');
-    };
-  }, []);
+    request.onblocked = () => console.warn('IndexedDB connection blocked');
 
-  // 当前显示的图片数据URL，从IndexedDB初始化
-  const [image, setImage] = useState(null);
+    return () => {
+      if (retryTimer) clearTimeout(retryTimer);
+    };
+  }, [showToast]);
 
   useEffect(() => {
-    if (db) {
-      const transaction = db.transaction('images', 'readonly');
-      const store = transaction.objectStore('images');
-      const request = store.get('current');
-      
-      request.onsuccess = () => {
-        if (request.result) {
-          setImage(request.result.url);
-          // 更新最近图片列表
-          const recentRequest = store.getAll();
-          recentRequest.onsuccess = () => {
-            const images = recentRequest.result
-              .filter(img => img.id !== 'current')
-              .map(img => img.url);
-            setRecentImages(images);
-          };
-        }
-      };
-    }
+    if (!db) return;
+    const transaction = db.transaction(STORE_NAME, 'readonly');
+    const store = transaction.objectStore(STORE_NAME);
+
+    const currentRequest = store.get('current');
+    currentRequest.onsuccess = () => {
+      if (currentRequest.result) setImage(currentRequest.result.url);
+    };
+
+    const listRequest = store.getAll();
+    listRequest.onsuccess = () => {
+      const items = listRequest.result
+        .filter((item) => item && item.id !== 'current' && item.url)
+        .sort((a, b) => String(a.id).localeCompare(String(b.id)))
+        .map((item) => ({ url: item.url, addedAt: item.addedAt, size: item.size }));
+      recentRef.current = items;
+      setRecentImages(items);
+    };
   }, [db]);
 
-  // 删除图片
-  const deleteImage = async (index) => {
-    // 先更新UI状态
-    const newImages = [...recentImages];
-    newImages.splice(index, 1);
-    // 确保数组中没有undefined或null值
-    const filteredImages = newImages.filter(img => img);
-    setRecentImages(filteredImages);
+  /* ---------------- 列表持久化 ---------------- */
 
-    if (db) {
-      const transaction = db.transaction('images', 'readwrite');
-      const store = transaction.objectStore('images');
-      
-      // 删除对应的图片记录
-      store.delete(`recent_${index}`);
-      
-      // 如果还有图片，重新索引
-      if (filteredImages.length > 0) {
-        // 删除所有旧的recent_*记录
-        const clearRequest = store.getAllKeys();
-        clearRequest.onsuccess = () => {
-          clearRequest.result
-            .filter(key => key.startsWith('recent_'))
-            .forEach(key => store.delete(key));
-            
-          // 重新保存更新后的图片列表
-          filteredImages.forEach((url, newIndex) => {
-            if (url) { // 确保url存在
-              store.put({ id: `recent_${newIndex}`, url });
-            }
+  const updateRecent = useCallback(
+    (next) => {
+      recentRef.current = next;
+      setRecentImages(next);
+
+      if (!db) return;
+      const transaction = db.transaction(STORE_NAME, 'readwrite');
+      const store = transaction.objectStore(STORE_NAME);
+      const keysRequest = store.getAllKeys();
+      keysRequest.onsuccess = () => {
+        keysRequest.result
+          .filter((key) => String(key).startsWith('recent_'))
+          .forEach((key) => store.delete(key));
+        next.forEach((item, index) => {
+          store.put({
+            id: `recent_${index}`,
+            url: item.url,
+            addedAt: item.addedAt,
+            size: item.size
           });
-        };
-      } else {
-        // 如果没有图片了，清除所有recent_*记录
-        const clearRequest = store.getAllKeys();
-        clearRequest.onsuccess = () => {
-          clearRequest.result
-            .filter(key => key.startsWith('recent_'))
-            .forEach(key => store.delete(key));
-        };
-      }
-    }
-  };
-
-  // 自定义setImage，在设置图片时更新最近图片列表
-  const setImageWithRecent = async (imageData) => {
-    setImage(imageData);
-    
-    if (db) {
-      const transaction = db.transaction('images', 'readwrite');
-      const store = transaction.objectStore('images');
-      
-      // 保存当前图片
-      store.put({ id: 'current', url: imageData });
-      
-      // 更新最近图片列表
-      const recentRequest = store.getAll();
-      recentRequest.onsuccess = () => {
-        // 过滤掉null或undefined的图片
-        const images = recentRequest.result
-          .filter(img => img && img.id !== 'current' && img.url)
-          .map(img => img.url);
-        
-        // 如果图片已存在，保持原有顺序；如果不存在，添加到开头
-        const existingIndex = images.indexOf(imageData);
-        let updatedImages = existingIndex >= 0 ? images : [imageData, ...images];
-        
-        // 过滤掉null值并确保数组长度不超过5
-        updatedImages = updatedImages
-          .filter(url => url) // 过滤掉null/undefined
-          .slice(0, 5); // 截取前5个
-        
-        setRecentImages(updatedImages);
-        
-        // 保存最近图片列表
-        updatedImages.forEach((url, index) => {
-          if (url) { // 再次确保url存在
-            store.put({ id: `recent_${index}`, url });
-          }
         });
       };
-    }
+    },
+    [db]
+  );
 
-    // 显示最近图片列表
-    setShowRecentImages(true);
+  const persistCurrent = useCallback(
+    (url) => {
+      if (!db) return;
+      const transaction = db.transaction(STORE_NAME, 'readwrite');
+      const store = transaction.objectStore(STORE_NAME);
+      if (url) store.put({ id: 'current', url });
+      else store.delete('current');
+    },
+    [db]
+  );
 
-    // 换图后关闭上一次的识别结果，避免展示与当前图片不匹配的面板
-    setShowOCR(false);
-  };
-  
-  // 当前选中的字符信息
-  const [selectedCharacter, setSelectedCharacter] = useState(null);
-  
-  // 最后一次点击的位置坐标
-  const [lastClickPosition, setLastClickPosition] = useState({ x: 0, y: 0 });
-  
-  // 是否正在拖动
-  const [isDragging, setIsDragging] = useState(false);
-  
-  // 拖动开始的位置
-  const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
-  
-  // 字符高度引用，用于跨组件共享
-  const charHeightRef = useRef(0);
-  
-  // 最近查看的图片列表
-  const [recentImages, setRecentImages] = useState([]);
-  
-  // 是否显示最近图片列表
-  const [showRecentImages, setShowRecentImages] = useState(false);
-  
-  // OCR 识别相关状态
-  const [showOCR, setShowOCR] = useState(false);
-  
-  // 图片元素的引用
-  const imageRef = useRef(null);
-  
-  // 获取图片引用的回调函数
-  const getImageRef = useCallback(() => imageRef.current, []);
+  /* ---------------- 交互 ---------------- */
 
-  // 处理图片上传
-  const handleImageUpload = async (e) => {
-    try {
-      const files = Array.from(e.target.files);
-      if (files.length === 0) return;
-
-      if (files.length > 5) {
-        alert('一次最多只能上传5个文件');
-        return;
-      }
-
-      // 检查文件类型是否为支持的图片格式
-      const supportedTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
-      const validFiles = files.filter(file => supportedTypes.includes(file.type));
-      
-      if (validFiles.length === 0) {
-        alert('请选择支持的图片格式（JPEG、PNG、GIF或WebP）');
-        return;
-      }
-
-      // 批量处理所有有效文件
-      const uploadPromises = validFiles.map(file => {
-        return new Promise((resolve, reject) => {
-          const reader = new FileReader();
-          
-          reader.onload = async (e) => {
-            try {
-              const result = e.target.result;
-              if (!result || typeof result !== 'string' || !result.startsWith('data:')) {
-                throw new Error('Invalid file data');
-              }
-              
-              const parts = result.split(',');
-              if (parts.length < 2) {
-                throw new Error('Invalid base64 format');
-              }
-              
-              const base64Data = parts[1];
-              if (!base64Data || base64Data.length < 100 || !/^[A-Za-z0-9+/=]+$/.test(base64Data)) {
-                throw new Error('Invalid base64 data');
-              }
-              
-              const imageData = `data:${file.type};base64,${base64Data}`;
-              await setImageWithRecent(imageData);
-              resolve(imageData);
-            } catch (error) {
-              console.error(`${file.name} 处理失败:`, error);
-              reject(error);
-            }
-          };
-
-          reader.onerror = (error) => {
-            console.error(`${file.name} 读取错误:`, error);
-            reject(error);
-          };
-
-          reader.onabort = () => {
-            console.warn(`${file.name} 读取中止`);
-            reject(new Error('读取中止'));
-          };
-
-          reader.readAsDataURL(file);
-        });
-      });
-
-      // 等待所有文件上传完成
-      const results = await Promise.allSettled(uploadPromises);
-      
+  const openPractice = useCallback(
+    (url) => {
+      setImage(url);
       setSelectedCharacter(null);
-    } catch (error) {
-      console.error('文件上传错误:', error);
-      alert('文件上传失败，请检查文件后重试');
-    }
-  };
+      setShowOCR(false);
+      setMode('practice');
+      persistCurrent(url);
+      window.scrollTo({ top: 0 });
+    },
+    [persistCurrent]
+  );
 
-  // 处理图片点击事件，用于选择字符
-  const handleCharacterClick = async (e) => {
-    try {
-      const currentImageRef = getImageRef();
-      if (!image || !currentImageRef) {
+  const handleOpenSticker = useCallback(
+    (index) => {
+      const item = recentRef.current[index];
+      if (!item) return;
+      updateRecent(promoteRecent(recentRef.current, item));
+      openPractice(item.url);
+    },
+    [openPractice, updateRecent]
+  );
+
+  const handleUpload = useCallback(
+    async (files) => {
+      if (!files || files.length === 0) return;
+
+      if (files.length > MAX_STICKERS) {
+        showToast(`一次最多上传 ${MAX_STICKERS} 张`);
         return;
       }
 
-      // 获取点击位置相对于图片的坐标
-      const imgRect = currentImageRef.getBoundingClientRect();
-      const clickX = e.clientX - imgRect.left;
-      const clickY = e.clientY - imgRect.top;
-
-      // 计算图片的实际尺寸
-      const naturalWidth = currentImageRef.naturalWidth > 0 ? currentImageRef.naturalWidth : imgRect.width;
-      const naturalHeight = currentImageRef.naturalHeight > 0 ? currentImageRef.naturalHeight : imgRect.height;
-      const effectiveHeight = imgRect.height > 0 ? imgRect.height : naturalHeight;
-      const effectiveWidth = imgRect.width > 0 ? imgRect.width : naturalWidth;
-
-      // 计算字符选择框的尺寸
-      const charAspectRatio = 1;
-      const charWidth = effectiveWidth * 0.25;
-      charHeightRef.current = charWidth * charAspectRatio;
-      const minCharHeight = effectiveHeight * 0.1;
-      if (charHeightRef.current < minCharHeight) {
-        charHeightRef.current = minCharHeight;
-      }
-
-      // 检查图片尺寸是否有效
-      if (effectiveWidth === 0 || effectiveHeight === 0) {
+      const valid = files.filter((file) => SUPPORTED_TYPES.includes(file.type));
+      if (valid.length === 0) {
+        showToast('请选择 JPG / PNG / GIF / WebP 图片');
         return;
       }
 
-      // 计算缩放比例
-      const scaleX = naturalWidth / imgRect.width;
-      const scaleY = naturalHeight / imgRect.height;
-      
-      // 计算字符选择框的视图坐标
-      const viewBoxX = (clickX - charWidth/2) * scaleX;
-      const viewBoxY = (clickY - charHeightRef.current/2) * scaleY;
-      const viewBoxWidth = charWidth * scaleX;
-      const viewBoxHeight = charHeightRef.current * scaleY;
-
-      // 检查计算结果是否有效
-      if (isNaN(viewBoxX) || isNaN(viewBoxY) || isNaN(viewBoxWidth) || isNaN(viewBoxHeight)) {
-        return;
-      }
-
-      // 设置选中的字符信息
-      setSelectedCharacter({
-        src: image,
-        width: naturalWidth,
-        height: naturalHeight,
-        viewBox: {
-          x: viewBoxX,
-          y: viewBoxY,
-          width: viewBoxWidth,
-          height: viewBoxHeight
+      const loaded = [];
+      for (const file of valid) {
+        try {
+          const dataUrl = await readFileAsDataUrl(file);
+          if (!isValidImageDataUrl(dataUrl)) throw new Error('数据无效');
+          loaded.push({ url: dataUrl, addedAt: Date.now(), size: file.size });
+        } catch (error) {
+          showToast(`${file.name} 读取失败`);
         }
-      });
+      }
 
-      // 保存点击位置
-      setLastClickPosition({ x: clickX, y: clickY });
-    } catch (error) {}
-  };
+      if (loaded.length === 0) return;
+
+      let next = recentRef.current;
+      loaded.forEach((item) => {
+        next = promoteRecent(next, item);
+      });
+      updateRecent(next);
+
+      if (valid.length < files.length) {
+        showToast(`已跳过 ${files.length - valid.length} 个不支持的文件`);
+      } else {
+        showToast(loaded.length > 1 ? `已添加 ${loaded.length} 张字帖` : '字帖已添加');
+      }
+
+      openPractice(loaded[0].url);
+    },
+    [openPractice, showToast, updateRecent]
+  );
+
+  const handlePickFiles = useCallback(() => {
+    if (fileInputRef.current) fileInputRef.current.click();
+  }, []);
+
+  const handleFileInputChange = useCallback(
+    (event) => {
+      const files = Array.from(event.target.files || []);
+      event.target.value = '';
+      if (files.length > 0) handleUpload(files);
+    },
+    [handleUpload]
+  );
+
+  const handleConfirmDelete = useCallback(() => {
+    const index = deleteIndex;
+    if (index === null) return;
+    const target = recentRef.current[index];
+    const next = recentRef.current.filter((_, itemIndex) => itemIndex !== index);
+    updateRecent(next);
+    setDeleteIndex(null);
+
+    if (target && target.url === image) {
+      setImage(null);
+      setSelectedCharacter(null);
+      setMode('library');
+      persistCurrent(null);
+    }
+    showToast('已删除');
+  }, [deleteIndex, image, persistCurrent, showToast, updateRecent]);
+
+  const handleClearAll = useCallback(() => {
+    updateRecent([]);
+    setImage(null);
+    setSelectedCharacter(null);
+    setMode('library');
+    persistCurrent(null);
+    showToast('已清空全部字帖');
+  }, [persistCurrent, showToast, updateRecent]);
+
+  const handleBackToLibrary = useCallback(() => {
+    setMode('library');
+    setSelectedCharacter(null);
+    setShowOCR(false);
+  }, []);
+
+  const currentIndex = recentImages.findIndex((item) => item.url === image);
+  const practiceTitle =
+    currentIndex >= 0 ? `字帖 ${String(currentIndex + 1).padStart(2, '0')}` : '临摹';
+
+  /* ---------------- 渲染 ---------------- */
 
   return (
-    <div className="container">
-      <h2>书法临摹助手</h2>
-
-      {/* 识别入口：改为按需触发，避免每次换图都跑一遍 OCR */}
-      {image && !selectedCharacter && (
-        <div className="action-bar">
-          <button
-            className="ocr-trigger-btn"
-            onClick={() => setShowOCR((visible) => !visible)}
-          >
-            {showOCR ? '收起识别结果' : '识别文字'}
-          </button>
-        </div>
-      )}
-      
-      {/* 最近图片列表组件 */}
-      <RecentImages 
-        recentImages={recentImages}
-        image={image}
-        setImage={setImageWithRecent}
-        handleImageUpload={handleImageUpload}
-        setSelectedCharacter={setSelectedCharacter}
-        deleteImage={deleteImage}
+    <div className="app">
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept={SUPPORTED_TYPES.join(',')}
+        multiple
+        className="visually-hidden"
+        onChange={handleFileInputChange}
       />
 
-      {/* 图片查看器组件 */}
-      <ImageViewer 
-        image={image}
-        handleCharacterClick={handleCharacterClick}
-        imageRef={imageRef}
-        selectedCharacter={selectedCharacter}
-      />
-
-      {/* 字符选择器组件 */}
-      {selectedCharacter && (
-        <CharacterSelector
+      {mode === 'practice' && image ? (
+        <PracticeView
+          image={image}
+          title={practiceTitle}
           selectedCharacter={selectedCharacter}
           setSelectedCharacter={setSelectedCharacter}
-          charHeightRef={charHeightRef}
+          onBack={handleBackToLibrary}
+          onOpenOCR={() => setShowOCR(true)}
         />
+      ) : (
+        <>
+          <header className={`app-header${headerScrolled ? ' app-header--scrolled' : ''}`}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <h1 className="app-header__title">{tab === 'settings' ? '设置' : '书法临摹'}</h1>
+              <span className="app-header__sub">
+                {tab === 'settings' ? '外观与数据' : '点选单字，逐字临摹'}
+              </span>
+            </div>
+            {tab === 'library' && (
+              <button className="icon-btn icon-btn--accent" onClick={handlePickFiles} aria-label="上传字帖">
+                <FaPlus size={15} />
+              </button>
+            )}
+          </header>
+
+          <main className="app-main">
+            {tab === 'settings' ? (
+              <SettingsView
+                theme={theme}
+                onChangeTheme={setTheme}
+                stickerCount={recentImages.length}
+                maxStickers={MAX_STICKERS}
+                onClearAll={handleClearAll}
+              />
+            ) : (
+              <Library
+                images={recentImages}
+                currentImage={image}
+                onOpen={handleOpenSticker}
+                onRequestDelete={setDeleteIndex}
+                onPickFiles={handlePickFiles}
+              />
+            )}
+          </main>
+
+          <nav className="tabbar">
+            <button
+              className={`tabbar__item${tab === 'library' ? ' tabbar__item--active' : ''}`}
+              onClick={() => setTab('library')}
+            >
+              <FaImages />
+              <span>字帖</span>
+            </button>
+            <button
+              className={`tabbar__item${tab === 'settings' ? ' tabbar__item--active' : ''}`}
+              onClick={() => setTab('settings')}
+            >
+              <FaCog />
+              <span>设置</span>
+            </button>
+          </nav>
+        </>
       )}
 
-      {/* OCR 识别结果组件 */}
-      {showOCR && image && !selectedCharacter && (
-        <OCRResults
+      {showOCR && image && (
+        <OCRSheet
           image={image}
-          onSelectCharacter={(charData) => {
-            setSelectedCharacter(charData);
+          onSelectCharacter={(character) => {
+            setSelectedCharacter(character);
             setShowOCR(false);
           }}
           onClose={() => setShowOCR(false)}
         />
       )}
+
+      {deleteIndex !== null && (
+        <div className="modal-backdrop" onClick={() => setDeleteIndex(null)}>
+          <div className="modal" onClick={(event) => event.stopPropagation()}>
+            <h3 className="modal__title">删除这张字帖？</h3>
+            <p className="modal__desc">删除后需重新上传，本机不会保留副本。</p>
+            <div className="modal__actions">
+              <button className="btn btn--ghost" onClick={() => setDeleteIndex(null)}>
+                取消
+              </button>
+              <button className="btn btn--danger" onClick={handleConfirmDelete}>
+                删除
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <Toast message={toast} />
     </div>
   );
 };
