@@ -92,9 +92,16 @@ calligraphy_app/
 │   ├── App.jsx               # 主应用组件 (373行)
 │   ├── index.css             # 全局样式
 │   └── components/
-│       ├── RecentImages.jsx    # 最近图片组件 (171行)
-│       ├── ImageViewer.jsx     # 图片查看器组件 (50行)
-│       └── CharacterSelector.jsx # 字符选择器组件 (519行)
+│       ├── Library.jsx         # 字帖库（网格卡片 / 空状态 / 添加）
+│       ├── PracticeView.jsx    # 临摹页（图片舞台 + 单字临摹 + 手势）
+│       ├── OCRSheet.jsx        # 文字识别底部抽屉
+│       ├── SettingsView.jsx    # 设置页（外观 / 数据 / 关于）
+│       └── Toast.jsx           # 轻提示
+│   ├── utils/
+│   │   ├── ocr.js              # OCR 预处理 / 识别 / 坐标映射
+│   │   └── charNav.js          # 竖排字符导航（纯函数）
+│   └── index.css               # 设计系统（令牌 + 组件样式 + 双主题）
+├── docs/screens/             # 界面截图
 ├── ios/                      # iOS 原生项目
 ├── android/                  # Android 原生项目
 ├── capacitor.config.json     # Capacitor 配置
@@ -107,34 +114,43 @@ calligraphy_app/
 
 ## 5. 组件说明
 
+### 5.0 信息架构
+
+```
+字帖库（Tab） ──点击卡片──▶ 临摹页 ──轻触图片──▶ 单字临摹
+     │                        │
+     │                        └─识别文字─▶ OCR 抽屉 ──点字──▶ 单字临摹
+     └─设置（Tab）：外观 / 数据 / 关于
+```
+
+- 底部 Tab：字帖 / 设置；临摹页为全屏沉浸式，不显示 Tab
+- 层级返回：单字临摹 ← 临摹页 ← 字帖库
+
 ### 5.1 App.jsx
-- 初始化 IndexedDB 数据库
-- 管理全局状态: 当前图片、选中字符、最近图片列表
-- 处理图片上传逻辑
-- 处理字符点击计算
+- 初始化 IndexedDB，管理字帖列表与当前图片
+- 视图路由（library / practice / settings）与 OCR 抽屉开关
+- 图片上传校验、去重置顶、删除与清空
+- 主题切换（跟随系统 / 浅色 / 深色）与轻提示
 
-### 5.2 RecentImages.jsx
-- 显示/隐藏最近图片列表
-- 图片上传 input
-- 长按删除功能
-- 删除确认弹窗
+### 5.2 Library.jsx
+- 2 列字帖卡片网格（缩略图 + 上传日期 + 大小）
+- 空状态引导与「添加字帖」占位卡
+- 卡片右上角菜单按钮触发删除确认
 
-### 5.3 ImageViewer.jsx
-- 显示书法图片
-- 集成 Magnifier 放大镜组件
-- 透明点击层捕获点击事件
+### 5.3 PracticeView.jsx
+- 图片模式：Magnifier 悬停放大 + 点选单字
+- 单字模式：SVG viewBox 裁剪、拖动平移、双指缩放、米字格辅助线
+- 字符滑轨（前 2 / 当前 / 后 2）与底部工具栏（上一字 / 缩小 / 微调 / 放大 / 下一字）
+- 微调方向盘、桌面端键盘快捷键
 
-### 5.4 CharacterSelector.jsx
-- SVG 视图显示选中区域
-- 拖动平移功能
-- 导航按钮 (上下左右、微调、缩放)
-- 相邻字符预览缩略图
-- 返回完整图片按钮
+### 5.4 OCRSheet.jsx
+- 底部抽屉：进度环、失败分类提示、重新识别
+- 「识别文字 / 原图标注」分段视图，点字进入单字临摹
 
-### 5.5 OCRResults.jsx
-- 按需触发的识别面板（点击“识别文字”按钮后加载）
-- 识别进度条、错误分类提示与重新识别入口
-- 原图标注框，点框或点文字回填 viewBox 进入字符视图
+### 5.5 utils/charNav.js
+- `getNextCharacterPosition` / `getPreviousCharacterPosition`：竖排按列推进
+- `getCharacterNeighborhood`：生成滑轨的 5 个位置
+- 从组件中提取为纯函数，与原实现做过 24000 次等价性对照
 
 ### 5.6 utils/ocr.js
 - `preprocessImage`: 限尺寸（最长边 2000px）+ 灰度化 + Gamma 对比度增强，返回 `{ dataUrl, scale }`
