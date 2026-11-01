@@ -4,6 +4,7 @@
       "version": "0.0.0",
       "type": "module",
       "scripts": {
+            "prestart": "node scripts/fetch-ocr-assets.mjs",
             "start": "vite --host 0.0.0.0",
             "predev": "node scripts/fetch-ocr-assets.mjs",
             "dev": "vite --host 0.0.0.0",
