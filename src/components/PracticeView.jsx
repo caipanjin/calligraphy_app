@@ -55,7 +55,7 @@ const touchDistance = (touches) => {
 /**
  * 临摹页：图片模式（点选单字）与单字模式（拖动 / 双指缩放 / 导航）
  */
-const PracticeView = ({ image, title, selectedCharacter, setSelectedCharacter, onBack, onOpenOCR }) => {
+const PracticeView = ({ image, title, selectedCharacter, setSelectedCharacter, onBack, onOpenOCR, recentImages = [], onSwitchImage }) => {
   const frameRef = useRef(null);
   const canvasRef = useRef(null);
   const gestureRef = useRef({ mode: 'none', x: 0, y: 0 });
@@ -286,6 +286,23 @@ const PracticeView = ({ image, title, selectedCharacter, setSelectedCharacter, o
     gestureRef.current = { mode: 'drag', x: touch.clientX, y: touch.clientY };
   };
 
+  const handleMinimapClick = (event) => {
+    if (!selectedCharacter) return;
+    const img = event.currentTarget.querySelector('img');
+    if (!img) return;
+    const imgRect = img.getBoundingClientRect();
+    if (!imgRect.width || !imgRect.height) return;
+    const scaleX = selectedCharacter.width / imgRect.width;
+    const scaleY = selectedCharacter.height / imgRect.height;
+    const centerX = (event.clientX - imgRect.left) * scaleX;
+    const centerY = (event.clientY - imgRect.top) * scaleY;
+    applyViewBox((viewBox) => ({
+      ...viewBox,
+      x: centerX - viewBox.width / 2,
+      y: centerY - viewBox.height / 2
+    }));
+  };
+
   /* ---------------- 键盘快捷键（桌面端） ---------------- */
 
   useEffect(() => {
@@ -335,14 +352,12 @@ const PracticeView = ({ image, title, selectedCharacter, setSelectedCharacter, o
             <FaImages size={16} />
           </button>
         ) : (
-          <button className="icon-btn icon-btn--accent" onClick={onOpenOCR} aria-label="识别文字">
-            <FaAlignLeft size={16} />
-          </button>
+          <span style={{ width: 44, height: 44 }} aria-hidden="true" />
         )}
       </div>
 
       {!isCharMode && (
-        <div className="practice__stage">
+        <div className="practice__body">
           <div className="stage-frame" ref={frameRef}>
             <Magnifier
               imageSrc={image}
@@ -356,12 +371,34 @@ const PracticeView = ({ image, title, selectedCharacter, setSelectedCharacter, o
               轻触选择要临摹的字
             </div>
           </div>
+
+          {recentImages.length > 1 && (
+            <div className="recent-strip">
+              {recentImages.map((item, index) => (
+                <button
+                  key={index}
+                  className={`recent-strip__item${item.url === image ? ' recent-strip__item--active' : ''}`}
+                  onClick={() => onSwitchImage && onSwitchImage(item.url)}
+                  aria-label={`切换到第 ${index + 1} 张字帖`}
+                >
+                  <img src={item.url} alt="" />
+                </button>
+              ))}
+            </div>
+          )}
+
+          <div className="stage-actions">
+            <button className="btn btn--ghost btn--block" onClick={onOpenOCR}>
+              <FaAlignLeft size={13} />
+              识别文字，按字跳转
+            </button>
+          </div>
         </div>
       )}
 
       {isCharMode && (
         <div className="char-view">
-          <div className="practice__stage">
+          <div className="char-body">
             <div
               className="char-canvas"
               ref={canvasRef}
@@ -386,38 +423,53 @@ const PracticeView = ({ image, title, selectedCharacter, setSelectedCharacter, o
               </svg>
               <div className="char-canvas__grid" aria-hidden="true" />
             </div>
-          </div>
 
-          <div className="char-strip">
-            {neighborhood.map((position, index) => {
-              const hidden = isHiddenPosition(position);
-              const active =
-                position.x === selectedCharacter.viewBox.x && position.y === selectedCharacter.viewBox.y;
-              return (
-                <button
-                  key={index}
-                  className={`char-thumb${active ? ' char-thumb--active' : ''}${
-                    hidden ? ' char-thumb--empty' : ''
-                  }`}
-                  onClick={() =>
-                    !hidden && applyViewBox((viewBox) => ({ ...viewBox, x: position.x, y: position.y }))
-                  }
-                  disabled={hidden}
-                  aria-label={active ? '当前字' : '跳转到相邻字'}
-                >
-                  <svg
-                    viewBox={`${position.x} ${position.y} ${selectedCharacter.viewBox.width} ${selectedCharacter.viewBox.height}`}
-                    preserveAspectRatio="xMidYMid meet"
+            <div className="char-minimap">
+              <button className="char-minimap__canvas" onClick={handleMinimapClick} aria-label="全景导航">
+                <img src={selectedCharacter.src} alt="" />
+                <span
+                  className="char-minimap__box"
+                  style={{
+                    left: `${(selectedCharacter.viewBox.x / selectedCharacter.width) * 100}%`,
+                    top: `${(selectedCharacter.viewBox.y / selectedCharacter.height) * 100}%`,
+                    width: `${(selectedCharacter.viewBox.width / selectedCharacter.width) * 100}%`,
+                    height: `${(selectedCharacter.viewBox.height / selectedCharacter.height) * 100}%`
+                  }}
+                />
+              </button>
+            </div>
+
+            <div className="char-strip">
+              {neighborhood.map((position, index) => {
+                const hidden = isHiddenPosition(position);
+                const active =
+                  position.x === selectedCharacter.viewBox.x && position.y === selectedCharacter.viewBox.y;
+                return (
+                  <button
+                    key={index}
+                    className={`char-thumb${active ? ' char-thumb--active' : ''}${
+                      hidden ? ' char-thumb--empty' : ''
+                    }`}
+                    onClick={() =>
+                      !hidden && applyViewBox((viewBox) => ({ ...viewBox, x: position.x, y: position.y }))
+                    }
+                    disabled={hidden}
+                    aria-label={active ? '当前字' : '跳转到相邻字'}
                   >
-                    <image
-                      href={selectedCharacter.src}
-                      width={selectedCharacter.width}
-                      height={selectedCharacter.height}
-                    />
-                  </svg>
-                </button>
-              );
-            })}
+                    <svg
+                      viewBox={`${position.x} ${position.y} ${selectedCharacter.viewBox.width} ${selectedCharacter.viewBox.height}`}
+                      preserveAspectRatio="xMidYMid meet"
+                    >
+                      <image
+                        href={selectedCharacter.src}
+                        width={selectedCharacter.width}
+                        height={selectedCharacter.height}
+                      />
+                    </svg>
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
           <div className="dock">

@@ -303,6 +303,16 @@ const App = () => {
     showToast('已清空全部字帖');
   }, [persistCurrent, showToast, updateRecent]);
 
+  const handleSwitchImage = useCallback(
+    (url) => {
+      if (!url || url === image) return;
+      setImage(url);
+      setSelectedCharacter(null);
+      persistCurrent(url);
+    },
+    [image, persistCurrent]
+  );
+
   const handleBackToLibrary = useCallback(() => {
     setMode('library');
     setSelectedCharacter(null);
@@ -334,6 +344,8 @@ const App = () => {
           setSelectedCharacter={setSelectedCharacter}
           onBack={handleBackToLibrary}
           onOpenOCR={() => setShowOCR(true)}
+          recentImages={recentImages}
+          onSwitchImage={handleSwitchImage}
         />
       ) : (
         <>
