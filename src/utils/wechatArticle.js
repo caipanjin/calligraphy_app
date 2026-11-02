@@ -42,6 +42,15 @@ export const extractImageUrls = (html) => {
   return urls;
 };
 
+/** 判断抓到的内容是不是微信的验证/环境异常页（风控拦截） */
+export const isWeChatBlockedPage = (html) => {
+  if (typeof html !== 'string') return false;
+  return (
+    /wappoc_appmsgcaptcha/.test(html) ||
+    /环境异常|去验证|完成验证|请在微信客户端打开/.test(html)
+  );
+};
+
 /** 判断是否为文章页链接（用于给出更明确的错误提示） */
 export const isWeChatArticleUrl = (url) => {
   if (typeof url !== 'string') return false;

@@ -7,7 +7,9 @@ import ImportSheet from './components/ImportSheet';
 import SettingsView from './components/SettingsView';
 import Toast from './components/Toast';
 import { hashImageData } from './utils/imageHash';
+import { App as CapApp } from '@capacitor/app';
 import { deleteSegmentationByPrefix, clearSegmentations, readSegmentation } from './utils/segmentCache';
+import { pickFirstUrl } from './utils/wechatArticle';
 import {
   deleteImagePractice,
   clearAllPractice,
@@ -63,6 +65,8 @@ const App = () => {
   const [selectedCharacter, setSelectedCharacter] = useState(null);
   const [showSegment, setShowSegment] = useState(false);
   const [showImport, setShowImport] = useState(false);
+  // 从外部（微信「用其他应用打开」）传入的待导入链接
+  const [importUrl, setImportUrl] = useState('');
   // 每张字帖的练习进度：{ [url]: { practiced, total } }
   const [progressMap, setProgressMap] = useState({});
   // 切分结果变更的版本号：切分面板改动后，临摹页据此重新读取已存网格
@@ -97,6 +101,52 @@ const App = () => {
     if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
     toastTimerRef.current = setTimeout(() => setToast(''), TOAST_DURATION);
   }, []);
+
+  /* ---------------- 接收外部分享的链接 ---------------- */
+
+  useEffect(() => {
+    let listener = null;
+    let cancelled = false;
+
+    // 从各种形态里提取出公众号链接
+    const handleIncomingUrl = (raw) => {
+      if (!raw) return;
+      const text = String(raw);
+      const picked = pickFirstUrl(text);
+      const target = picked || (/^https?:\/\//i.test(text) ? text : '');
+      if (!target) return;
+      if (!/mp\.weixin\.qq\.com/i.test(target)) {
+        showToast('链接不是公众号文章，已忽略');
+        return;
+      }
+      setImportUrl(target);
+      setShowImport(true);
+    };
+
+    const register = async () => {
+      try {
+        // App 已在运行时，监听后续打开
+        listener = await CapApp.addListener('appUrlOpen', (event) => {
+          handleIncomingUrl(event && event.url);
+        });
+        // App 由链接冷启动时，取首次 URL
+        const launch = await CapApp.getLaunchUrl();
+        if (!cancelled && launch && launch.url) {
+          handleIncomingUrl(launch.url);
+        }
+      } catch (error) {
+        // Web 环境没有该插件能力，忽略
+      }
+    };
+
+    register();
+
+    return () => {
+      cancelled = true;
+      if (listener && listener.remove) listener.remove();
+    };
+  }, [showToast]);
+
 
   useEffect(
     () => () => {
@@ -546,8 +596,12 @@ const App = () => {
 
       {showImport && (
         <ImportSheet
+          initialUrl={importUrl}
           onImport={handleImportImages}
-          onClose={() => setShowImport(false)}
+          onClose={() => {
+            setShowImport(false);
+            setImportUrl('');
+          }}
         />
       )}
 

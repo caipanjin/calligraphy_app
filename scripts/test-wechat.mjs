@@ -6,7 +6,8 @@ import {
   isWeChatArticleUrl,
   pickFirstUrl,
   guessImageWidth,
-  filterUsableImages
+  filterUsableImages,
+  isWeChatBlockedPage
 } from '../src/utils/wechatArticle.js';
 
 let passed = 0;
@@ -72,6 +73,12 @@ check('过滤过小图片，保留原图标记(0)', () => {
   const out = filterUsableImages(urls);
   assert.equal(out.length, 2);
   assert.ok(!out.some(u => u.includes('/a/')));
+});
+
+check('识别微信风控验证页', () => {
+  assert.equal(isWeChatBlockedPage('<html>wappoc_appmsgcaptcha</html>'), true);
+  assert.equal(isWeChatBlockedPage('<div>环境异常</div>'), true);
+  assert.equal(isWeChatBlockedPage('<html><img src="https://mmbiz.qpic.cn/a/640?wx_fmt=jpeg"></html>'), false);
 });
 
 // 真实文章回归（若存在抓取样本）

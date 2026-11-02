@@ -7,7 +7,7 @@ import {
   FaExclamationTriangle,
   FaClipboard
 } from 'react-icons/fa';
-import { extractImageUrls, isWeChatArticleUrl, pickFirstUrl } from '../utils/wechatArticle';
+import { extractImageUrls, isWeChatArticleUrl, pickFirstUrl, isWeChatBlockedPage } from '../utils/wechatArticle';
 import { fetchText, fetchImageAsDataUrl } from '../utils/httpClient';
 
 /**
@@ -63,6 +63,13 @@ const ImportSheet = ({ onImport, onClose, initialUrl = '' }) => {
 
       if (httpStatus !== 200) {
         setErrorMessage(`抓取失败（HTTP ${httpStatus}）。文章可能需要验证或已删除。`);
+        setStatus('error');
+        return;
+      }
+
+      // 微信风控：请求过于频繁时会被跳转到验证页
+      if (isWeChatBlockedPage(text)) {
+        setErrorMessage('微信暂时限制了访问（出现验证页）。请等几分钟再试，或直接在微信内保存图片导入。');
         setStatus('error');
         return;
       }

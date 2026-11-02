@@ -38,8 +38,10 @@ export const fetchText = async (url, { timeoutMs = 20000 } = {}) => {
   }
 
   // 浏览器开发环境：经 vite 代理转发，避开 CORS
+  // 注意：实测最简请求头反而能拿到正文，带完整浏览器头会被微信风控拦到验证码页。
+  // 真实的浏览器头由 vite 代理在服务端注入，这里只需一个简单的 Accept。
   const proxied = toDevProxyUrl(url);
-  const response = await fetch(proxied, { headers: WECHAT_ARTICLE_HEADERS });
+  const response = await fetch(proxied, { headers: { Accept: 'text/html' } });
   return { status: response.status, text: await response.text() };
 };
 

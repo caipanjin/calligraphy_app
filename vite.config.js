@@ -13,10 +13,20 @@ export default defineConfig({
         target: 'https://mp.weixin.qq.com',
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/wx-proxy/, ''),
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36',
-          Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-          'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8'
+        // 用 configure 强制覆盖请求头（浏览器自带的 UA/Referer 会触发微信风控）
+        configure: (proxy) => {
+          proxy.on('proxyReq', (proxyReq) => {
+            proxyReq.setHeader(
+              'User-Agent',
+              'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36'
+            );
+            proxyReq.setHeader('Accept', 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8');
+            proxyReq.setHeader('Accept-Language', 'zh-CN,zh;q=0.9,en;q=0.8');
+            proxyReq.removeHeader('origin');
+            proxyReq.removeHeader('referer');
+            // 关键：去掉压缩协商，避免代理转发压缩流时被浏览器重复处理导致拿到不完整内容
+            proxyReq.removeHeader('accept-encoding');
+          });
         }
       },
       '/wx-img': {
