@@ -28,6 +28,7 @@
 ### 2.4 数据存储
 - IndexedDB: 本地离线存储图片和历史记录
 - 自动切字：纯前端投影算法（`src/utils/segment.js`），无模型、毫秒级、完全离线
+- 切分缓存：IndexedDB `segmentations` store，按图片哈希 + 版面模式存储，重复打开 3ms 命中
 
 ## 3. 功能规范
 
@@ -157,7 +158,10 @@ calligraphy_app/
 - `buildInkMask`: 缩放 + 灰度 + Otsu 二值化 + 反色修正，产出墨迹掩码
 - `projectColumns` / `projectRows`: 垂直 / 水平墨迹投影
 - `findBands`: 从投影中找出有墨连续段，合并字内间隙、过滤噪点
-- `segmentCharacters`: 按列/行递归切分，超大块按中位字高等分，返回原图坐标的字框
+- `segmentCharacters`: 按列/行递归切分，超宽带按字距等分，列内字数取众数归一，返回原图坐标的字框
+- `estimatePitch`: 列投影自相关估算字距
+- `utils/imageHash.js`: 抽样 FNV-1a 图片指纹
+- `utils/segmentCache.js`: 切分结果读写（IndexedDB）
 
 ## 6. 已知问题
 

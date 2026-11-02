@@ -4,6 +4,7 @@
  */
 import assert from 'node:assert/strict';
 import { findBands, otsuThreshold, estimatePitch, buildGridBoxes } from '../src/utils/segment.js';
+import { hashImageData } from '../src/utils/imageHash.js';
 
 let passed = 0;
 const check = (name, fn) => {
@@ -116,6 +117,32 @@ check('网格拟合：空白区域不产出字框', () => {
   for (let y = 10; y < 90; y += 1) for (let x = 10; x < 90; x += 1) ink[y * W + x] = 1;
   const boxes = buildGridBoxes(ink, W, H, 100, 'vertical');
   assert.equal(boxes.length, 1, `实际 ${boxes.length}`);
+});
+
+check('图片哈希：相同内容得到相同键', () => {
+  const a = hashImageData('data:image/jpeg;base64,' + 'A'.repeat(5000));
+  const b = hashImageData('data:image/jpeg;base64,' + 'A'.repeat(5000));
+  assert.equal(a, b);
+});
+
+check('图片哈希：不同内容得到不同键', () => {
+  const a = hashImageData('data:image/jpeg;base64,' + 'A'.repeat(5000));
+  const b = hashImageData('data:image/jpeg;base64,' + 'B'.repeat(5000));
+  assert.notEqual(a, b);
+});
+
+check('图片哈希：长度不同但前缀相同时可区分', () => {
+  const a = hashImageData('x'.repeat(1000));
+  const b = hashImageData('x'.repeat(1001));
+  assert.notEqual(a, b);
+});
+
+check('图片哈希：超长输入仍快速（抽样）', () => {
+  const big = 'y'.repeat(8 * 1024 * 1024);
+  const t0 = Date.now();
+  hashImageData(big);
+  const ms = Date.now() - t0;
+  assert.ok(ms < 500, `耗时 ${ms}ms`);
 });
 
 console.log(`\n${passed} 项通过`);

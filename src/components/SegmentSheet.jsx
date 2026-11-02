@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { FaTimes, FaRedo, FaExclamationTriangle, FaHandPointer } from 'react-icons/fa';
 import { segmentCharacters } from '../utils/segment';
+import { hashImageData } from '../utils/imageHash';
+import { readSegmentation, writeSegmentation } from '../utils/segmentCache';
 
 const LAYOUT_OPTIONS = [
   { value: 'auto', label: '自动' },
@@ -11,7 +13,7 @@ const LAYOUT_OPTIONS = [
 /**
  * 自动切字抽屉：把整幅字帖按投影切成单字，点任意框直接进入单字临摹
  */
-const SegmentSheet = ({ image, onSelectCharacter, onClose }) => {
+const SegmentSheet = ({ image, db, onSelectCharacter, onClose }) => {
   const [status, setStatus] = useState('loading');
   const [result, setResult] = useState(null);
   const [layout, setLayout] = useState('auto');
@@ -33,13 +35,39 @@ const SegmentSheet = ({ image, onSelectCharacter, onClose }) => {
           img.onerror = () => reject(new Error('图片加载失败'));
         });
         if (cancelled) return;
-        setImageSize({ width: img.naturalWidth || img.width, height: img.naturalHeight || img.height });
+        const naturalWidth = img.naturalWidth || img.width;
+        const naturalHeight = img.naturalHeight || img.height;
+        setImageSize({ width: naturalWidth, height: naturalHeight });
+
+        const cacheKey = `${hashImageData(image)}:${layout}`;
+
+        // 命中缓存直接复用（点「重新切分」时强制重算）
+        if (attempt === 0) {
+          const cached = await readSegmentation(db, cacheKey);
+          if (cancelled) return;
+          if (cached && cached.boxes && cached.boxes.length > 0 && cached.imageWidth === naturalWidth) {
+            setResult({ boxes: cached.boxes, layout: cached.layout, strategy: cached.strategy });
+            setStatus('done');
+            return;
+          }
+        }
 
         const segmentation = await segmentCharacters(image, { layout });
         if (cancelled) return;
 
         setResult(segmentation);
-        setStatus(segmentation.failed || segmentation.boxes.length === 0 ? 'empty' : 'done');
+        const empty = segmentation.failed || segmentation.boxes.length === 0;
+        setStatus(empty ? 'empty' : 'done');
+
+        if (!empty) {
+          writeSegmentation(db, cacheKey, {
+            boxes: segmentation.boxes,
+            layout: segmentation.layout,
+            strategy: segmentation.strategy,
+            imageWidth: naturalWidth,
+            imageHeight: naturalHeight
+          });
+        }
       } catch (error) {
         if (!cancelled) setStatus('error');
       }
@@ -50,7 +78,7 @@ const SegmentSheet = ({ image, onSelectCharacter, onClose }) => {
     return () => {
       cancelled = true;
     };
-  }, [image, layout, attempt]);
+  }, [image, layout, attempt, db]);
 
   useEffect(() => {
     const onKeyDown = (event) => {

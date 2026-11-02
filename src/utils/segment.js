@@ -443,6 +443,63 @@ const splitOversized = (boxes, axis) => {
 };
 
 /**
+ * 列内字数归一：按众数裁掉多出来的框
+ * 字帖的每列字数通常一致（末列可能少），个别列多出来的通常是贴边残块或非文字
+ */
+const normalizeColumnCounts = (boxes, columnRanges, layout) => {
+  if (boxes.length < 4 || !columnRanges.length) return boxes;
+
+  const groups = columnRanges.map(() => []);
+  boxes.forEach((box) => {
+    const center = layout === 'vertical' ? box.x + box.width / 2 : box.y + box.height / 2;
+    let bestIndex = -1;
+    let bestDistance = Infinity;
+    columnRanges.forEach((range, index) => {
+      const rangeCenter = (range.start + range.end) / 2;
+      const distance = Math.abs(center - rangeCenter);
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        bestIndex = index;
+      }
+    });
+    if (bestIndex >= 0) groups[bestIndex].push(box);
+  });
+
+  const counts = groups.map((group) => group.length).filter((count) => count > 0);
+  if (counts.length < 3) return boxes;
+
+  // 众数（出现次数最多的字数）；并列则不动
+  const tally = new Map();
+  counts.forEach((count) => tally.set(count, (tally.get(count) || 0) + 1));
+  let mode = 0;
+  let modeHits = 0;
+  let tie = false;
+  tally.forEach((hits, count) => {
+    if (hits > modeHits) {
+      mode = count;
+      modeHits = hits;
+      tie = false;
+    } else if (hits === modeHits) {
+      tie = true;
+    }
+  });
+  if (tie || mode <= 0) return boxes;
+
+  const kept = [];
+  groups.forEach((group) => {
+    if (group.length <= mode) {
+      kept.push(...group);
+      return;
+    }
+    // 多出来的从末尾裁掉（竖排取 y 最大的，横排取 x 最大的）
+    const sorted = [...group].sort((a, b) => (layout === 'vertical' ? a.y - b.y : a.x - b.x));
+    kept.push(...sorted.slice(0, mode));
+  });
+
+  return kept.length > 0 ? kept : boxes;
+};
+
+/**
  * 主入口：把整幅字帖切成一个个单字
  * @returns {Promise<{boxes: Array, layout: string, columns: number, scale: number, failed: boolean, reason?: string}>}
  */
@@ -593,6 +650,15 @@ export const segmentCharacters = async (imageSrc, options = {}) => {
         layout = gridLayout;
       }
     }
+  }
+
+  // 列内字数归一（去掉多出来的残块）
+  if (usable.length > 0) {
+    const ranges =
+      layout === 'vertical'
+        ? colBands.map((band) => ({ start: band.start / scale, end: band.end / scale }))
+        : rowBands.map((band) => ({ start: band.start / scale, end: band.end / scale }));
+    usable = normalizeColumnCounts(usable, ranges, layout);
   }
 
   if (usable.length === 0) {

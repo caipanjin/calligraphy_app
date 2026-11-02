@@ -5,10 +5,12 @@ import PracticeView from './components/PracticeView';
 import SegmentSheet from './components/SegmentSheet';
 import SettingsView from './components/SettingsView';
 import Toast from './components/Toast';
+import { hashImageData } from './utils/imageHash';
+import { deleteSegmentationByPrefix, clearSegmentations } from './utils/segmentCache';
 import { FaImages, FaCog, FaPlus } from 'react-icons/fa';
 
 const DB_NAME = 'calligraphyImages';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const STORE_NAME = 'images';
 const THEME_STORAGE_KEY = 'calligraphy:theme';
 const TOAST_DURATION = 2200;
@@ -115,6 +117,10 @@ const App = () => {
       const database = event.target.result;
       if (!database.objectStoreNames.contains(STORE_NAME)) {
         database.createObjectStore(STORE_NAME, { keyPath: 'id' });
+      }
+      // 切分结果缓存（按图片哈希存储，避免每次重新计算）
+      if (!database.objectStoreNames.contains('segmentations')) {
+        database.createObjectStore('segmentations', { keyPath: 'id' });
       }
     };
 
@@ -285,6 +291,10 @@ const App = () => {
     updateRecent(next);
     setDeleteIndex(null);
 
+    if (target) {
+      deleteSegmentationByPrefix(db, hashImageData(target.url));
+    }
+
     if (target && target.url === image) {
       setImage(null);
       setSelectedCharacter(null);
@@ -295,13 +305,14 @@ const App = () => {
   }, [deleteIndex, image, persistCurrent, showToast, updateRecent]);
 
   const handleClearAll = useCallback(() => {
+    clearSegmentations(db);
     updateRecent([]);
     setImage(null);
     setSelectedCharacter(null);
     setMode('library');
     persistCurrent(null);
     showToast('已清空全部字帖');
-  }, [persistCurrent, showToast, updateRecent]);
+  }, [db, persistCurrent, showToast, updateRecent]);
 
   const handleSwitchImage = useCallback(
     (url) => {
@@ -404,6 +415,7 @@ const App = () => {
 
       {showSegment && image && (
         <SegmentSheet
+          db={db}
           image={image}
           onSelectCharacter={(character) => {
             setSelectedCharacter(character);
