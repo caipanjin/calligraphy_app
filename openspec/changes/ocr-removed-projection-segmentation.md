@@ -444,6 +444,41 @@
 - 删除横排分支、`splitOversized`（已无调用者）
 - 格线检测中的「横线」保留（横线是格子的一部分）
 
+## 第十二轮：删除/清空字帖时的关联清理（原有实现失效）
+
+### 问题
+
+删除字帖或「清空全部字帖」时，切分缓存与字帖设置**完全没有被清理**，实测：
+
+| 操作 | 清理前 | 清理后（修复前） |
+|---|---|---|
+| 删除 1 张字帖 | segs 2 / sets 1 | **segs 2 / sets 1**（未变） |
+| 清空全部 | segs 2 / sets 1 | **segs 2 / sets 1**（未变） |
+
+两个缺陷叠加：
+
+1. `deleteSegmentationByPrefix` 只处理 `segmentations`，**完全不碰 `segmentationSettings`**
+2. `deleteSegmentationByPrefix` 在 `getAllKeys().onsuccess` 里删除后，
+   resolve 却挂在调用点 —— 事务提交与删除时机不可靠，实际未生效
+
+### 修正
+
+- 两个 store **一起处理**（同一事务内，`objectStoreNames.contains` 判断存在性）
+- `resolve` 改挂 `transaction.oncomplete`，确保删除已在事务内提交
+- 增加 `onabort` 兜底
+- `clearSegmentations` 同样改为清理两个 store
+
+### 验证（真实 IndexedDB）
+
+| 场景 | 结果 |
+|---|---|
+| 删除单张字帖 | segs 2→0、sets 1→0 ✅ |
+| 清空全部 | segs→0、sets→0、imgs→0 ✅ |
+| 两张图删其一 | segs 4→2、sets 2→1，**另一张完整保留** ✅ |
+
+新增 `scripts/test-cache.mjs`（5 项）覆盖：按前缀双表清理、只删目标、前缀不误删相似哈希、清空双表、缺表不报错。
+`npm test` 共 **36 项**。
+
 ## 遗留
 
 - 未用真实手机拍摄的字帖照片验证（合成图偏「干净」），透视/阴影可能影响切分

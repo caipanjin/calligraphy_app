@@ -96,34 +96,79 @@ export const deleteSegmentation = (db, key) =>
     request.onerror = () => resolve(false);
   });
 
-/** 删除某张图片的全部缓存（所有版面模式） */
+/**
+ * 删除某张图片的全部记录：切分缓存（含手动结果）+ 字帖设置
+ *
+ * 注意：getAllKeys 是异步的，必须等它在事务内完成删除后，事务才会提交，
+ * 因此 resolve 要挂在 transaction.oncomplete 上。
+ */
 export const deleteSegmentationByPrefix = (db, prefix) =>
   new Promise((resolve) => {
-    const transaction = withStore(db, 'readwrite', (store) => store);
-    if (!transaction) {
+    if (!db || !prefix) {
       resolve(false);
       return;
     }
-    const store = transaction.objectStore(SEGMENT_STORE);
-    const keysRequest = store.getAllKeys();
-    keysRequest.onsuccess = () => {
-      keysRequest.result
-        .filter((key) => String(key).startsWith(prefix))
-        .forEach((key) => store.delete(key));
-    };
+
+    const storeNames = [];
+    if (db.objectStoreNames.contains(SEGMENT_STORE)) storeNames.push(SEGMENT_STORE);
+    if (db.objectStoreNames.contains(SETTINGS_STORE)) storeNames.push(SETTINGS_STORE);
+    if (storeNames.length === 0) {
+      resolve(false);
+      return;
+    }
+
+    let transaction;
+    try {
+      transaction = db.transaction(storeNames, 'readwrite');
+    } catch (error) {
+      resolve(false);
+      return;
+    }
+
     transaction.oncomplete = () => resolve(true);
     transaction.onerror = () => resolve(false);
+    transaction.onabort = () => resolve(false);
+
+    storeNames.forEach((name) => {
+      const store = transaction.objectStore(name);
+      const keysRequest = store.getAllKeys();
+      keysRequest.onsuccess = () => {
+        keysRequest.result
+          .filter((key) => String(key).startsWith(prefix))
+          .forEach((key) => store.delete(key));
+      };
+    });
   });
 
 /** 清空所有切分缓存 */
 export const clearSegmentations = (db) =>
   new Promise((resolve) => {
-    const transaction = withStore(db, 'readwrite', (store) => store);
-    if (!transaction) {
+    if (!db) {
       resolve(false);
       return;
     }
-    transaction.objectStore(SEGMENT_STORE).clear();
+
+    const storeNames = [];
+    if (db.objectStoreNames.contains(SEGMENT_STORE)) storeNames.push(SEGMENT_STORE);
+    if (db.objectStoreNames.contains(SETTINGS_STORE)) storeNames.push(SETTINGS_STORE);
+    if (storeNames.length === 0) {
+      resolve(false);
+      return;
+    }
+
+    let transaction;
+    try {
+      transaction = db.transaction(storeNames, 'readwrite');
+    } catch (error) {
+      resolve(false);
+      return;
+    }
+
     transaction.oncomplete = () => resolve(true);
     transaction.onerror = () => resolve(false);
+    transaction.onabort = () => resolve(false);
+
+    storeNames.forEach((name) => {
+      transaction.objectStore(name).clear();
+    });
   });
