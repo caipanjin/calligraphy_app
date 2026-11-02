@@ -7,10 +7,11 @@ import SettingsView from './components/SettingsView';
 import Toast from './components/Toast';
 import { hashImageData } from './utils/imageHash';
 import { deleteSegmentationByPrefix, clearSegmentations } from './utils/segmentCache';
+import { deleteImagePractice, clearAllPractice } from './utils/practiceStore';
 import { FaImages, FaCog, FaPlus } from 'react-icons/fa';
 
 const DB_NAME = 'calligraphyImages';
-const DB_VERSION = 3;
+const DB_VERSION = 4;
 const STORE_NAME = 'images';
 const THEME_STORAGE_KEY = 'calligraphy:theme';
 const TOAST_DURATION = 2200;
@@ -127,6 +128,14 @@ const App = () => {
       // 每张字帖的用户设置（版面模式 / 是否带格子线）
       if (!database.objectStoreNames.contains('segmentationSettings')) {
         database.createObjectStore('segmentationSettings', { keyPath: 'id' });
+      }
+      // 练习记录：每个字练过几次（键 = 图片哈希:字索引）
+      if (!database.objectStoreNames.contains('practiceRecords')) {
+        database.createObjectStore('practiceRecords', { keyPath: 'id' });
+      }
+      // 每日练习汇总（键 = YYYY-MM-DD）
+      if (!database.objectStoreNames.contains('practiceDaily')) {
+        database.createObjectStore('practiceDaily', { keyPath: 'id' });
       }
     };
 
@@ -298,7 +307,9 @@ const App = () => {
     setDeleteIndex(null);
 
     if (target) {
-      deleteSegmentationByPrefix(db, hashImageData(target.url));
+      const imageHash = hashImageData(target.url);
+      deleteSegmentationByPrefix(db, imageHash);
+      deleteImagePractice(db, imageHash);
     }
 
     if (target && target.url === image) {
@@ -312,6 +323,7 @@ const App = () => {
 
   const handleClearAll = useCallback(() => {
     clearSegmentations(db);
+    clearAllPractice(db);
     updateRecent([]);
     setImage(null);
     setSelectedCharacter(null);

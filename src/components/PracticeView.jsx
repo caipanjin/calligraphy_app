@@ -19,6 +19,11 @@ import {
   isHiddenPosition
 } from '../utils/charNav';
 import { readSegmentation, readSettings, writeSegmentation } from '../utils/segmentCache';
+import {
+  recordPractice,
+  readPractice,
+  PRACTICE_THRESHOLD_MS
+} from '../utils/practiceStore';
 import { hashImageData } from '../utils/imageHash';
 import { segmentCharacters } from '../utils/segment';
 
@@ -82,6 +87,9 @@ const PracticeView = ({
   const [savedLayout, setSavedLayout] = useState('vertical');
   // 图片原始尺寸（渲染网格用；不能依赖 ref，ref 在重新挂载时是 null）
   const [naturalSize, setNaturalSize] = useState({ width: 0, height: 0 });
+  // 当前字练过次数（用于顶栏展示）
+  const [practiceCount, setPracticeCount] = useState(0);
+  const practiceTimerRef = useRef(null);
   // 当前字帖的缓存键与已保存的单字取景调整
   const cacheKeyRef = useRef('');
   const adjustmentsRef = useRef({});
@@ -207,6 +215,48 @@ const PracticeView = ({
       cancelled = true;
     };
   }, [image, db, gridVersion]);
+
+  /* ---------------- 练习记录 ---------------- */
+
+  // 进入某个字：读已有次数 + 起计时器（停留 3 秒算练过一次）
+  useEffect(() => {
+    if (practiceTimerRef.current) {
+      clearTimeout(practiceTimerRef.current);
+      practiceTimerRef.current = null;
+    }
+
+    const character = selectedCharacter;
+    if (!character || !db || !image) {
+      setPracticeCount(0);
+      return undefined;
+    }
+    const gridIndex = character.grid && typeof character.grid.index === 'number' ? character.grid.index : -1;
+    if (gridIndex < 0) {
+      setPracticeCount(0);
+      return undefined;
+    }
+
+    const imageHash = hashImageData(image);
+    let cancelled = false;
+
+    readPractice(db, imageHash, gridIndex).then((record) => {
+      if (!cancelled) setPracticeCount(record ? record.count || 0 : 0);
+    });
+
+    practiceTimerRef.current = setTimeout(async () => {
+      if (cancelled) return;
+      const saved = await recordPractice(db, imageHash, gridIndex);
+      if (!cancelled && saved) setPracticeCount(saved.count || 0);
+    }, PRACTICE_THRESHOLD_MS);
+
+    return () => {
+      cancelled = true;
+      if (practiceTimerRef.current) {
+        clearTimeout(practiceTimerRef.current);
+        practiceTimerRef.current = null;
+      }
+    };
+  }, [selectedCharacter, db, image]);
 
   /* ---------------- 图片模式：点选单字 ---------------- */
 
@@ -622,7 +672,11 @@ const PracticeView = ({
         >
           <FaChevronLeft size={17} />
         </button>
-        <div className="practice__bar-title">{isCharMode ? '单字临摹' : title || '临摹'}</div>
+        <div className="practice__bar-title">
+          {isCharMode
+            ? `单字临摹${practiceCount > 0 ? ` · 练过 ${practiceCount} 次` : ''}`
+            : title || '临摹'}
+        </div>
         {isCharMode ? (
           <button className="icon-btn" onClick={onBack} aria-label="返回字帖库">
             <FaImages size={16} />
