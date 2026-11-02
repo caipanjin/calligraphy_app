@@ -213,7 +213,9 @@ const SegmentSheet = ({ image, db, onSelectCharacter, onClose }) => {
       strategy: 'manual',
       edited: true,
       imageWidth: imageSize.width,
-      imageHeight: imageSize.height
+      imageHeight: imageSize.height,
+      // 框的数量/顺序变了，之前按索引存的单字取景会错位，直接清空
+      adjustments: {}
     });
   };
 

@@ -82,6 +82,10 @@ const PracticeView = ({
   const [savedLayout, setSavedLayout] = useState('vertical');
   // 图片原始尺寸（渲染网格用；不能依赖 ref，ref 在重新挂载时是 null）
   const [naturalSize, setNaturalSize] = useState({ width: 0, height: 0 });
+  // 当前字帖的缓存键与已保存的单字取景调整
+  const cacheKeyRef = useRef('');
+  const adjustmentsRef = useRef({});
+  const saveTimerRef = useRef(null);
 
   const isCharMode = Boolean(selectedCharacter);
 
@@ -137,13 +141,23 @@ const PracticeView = ({
         const manual = await readSegmentation(db, `${key}:manual`);
         if (cancelled) return;
         if (manual && manual.boxes && manual.boxes.length > 0) {
-          found = { boxes: manual.boxes, layout: manual.layout || 'vertical' };
+          found = {
+            boxes: manual.boxes,
+            layout: manual.layout || 'vertical',
+            cacheKey: `${key}:manual`,
+            adjustments: manual.adjustments || {}
+          };
           break;
         }
         const auto = await readSegmentation(db, key);
         if (cancelled) return;
         if (auto && auto.boxes && auto.boxes.length > 0) {
-          found = { boxes: auto.boxes, layout: auto.layout || 'vertical' };
+          found = {
+            boxes: auto.boxes,
+            layout: auto.layout || 'vertical',
+            cacheKey: key,
+            adjustments: auto.adjustments || {}
+          };
           break;
         }
       }
@@ -159,8 +173,14 @@ const PracticeView = ({
           });
           if (cancelled) return;
           if (segmentation && !segmentation.failed && segmentation.boxes.length > 0) {
-            found = { boxes: segmentation.boxes, layout: segmentation.layout || 'vertical' };
-            writeSegmentation(db, `${prefix}${desiredLayout}:${desiredGrid ? 'grid' : 'free'}`, {
+            const newKey = `${prefix}${desiredLayout}:${desiredGrid ? 'grid' : 'free'}`;
+            found = {
+              boxes: segmentation.boxes,
+              layout: segmentation.layout || 'vertical',
+              cacheKey: newKey,
+              adjustments: {}
+            };
+            writeSegmentation(db, newKey, {
               boxes: segmentation.boxes,
               layout: segmentation.layout,
               strategy: segmentation.strategy,
@@ -176,6 +196,9 @@ const PracticeView = ({
       if (!cancelled) {
         setSavedBoxes(found ? found.boxes : null);
         setSavedLayout(found && found.layout ? found.layout : 'vertical');
+        cacheKeyRef.current =
+          (found && found.cacheKey) || `${prefix}${desiredLayout}:${desiredGrid ? 'grid' : 'free'}`;
+        adjustmentsRef.current = (found && found.adjustments) || {};
       }
     };
 
@@ -198,16 +221,19 @@ const PracticeView = ({
     const x = Math.max(0, box.x - padding);
     const y = Math.max(0, box.y - padding);
 
+    const savedView = adjustmentsRef.current[index];
     setSelectedCharacter({
       src: image,
       width: naturalWidth,
       height: naturalHeight,
-      viewBox: {
-        x,
-        y,
-        width: Math.min(naturalWidth - x, box.width + padding * 2),
-        height: Math.min(naturalHeight - y, box.height + padding * 2)
-      },
+      viewBox: savedView
+        ? { ...savedView }
+        : {
+            x,
+            y,
+            width: Math.min(naturalWidth - x, box.width + padding * 2),
+            height: Math.min(naturalHeight - y, box.height + padding * 2)
+          },
       grid: { boxes: savedBoxes, index }
     });
   };
@@ -254,14 +280,46 @@ const PracticeView = ({
 
   /* ---------------- 单字模式：视图变换 ---------------- */
 
+  // 把当前字的取景写入缓存（防抖 500ms）
+  const scheduleSaveAdjustment = useCallback((index, viewBox) => {
+    if (index === null || index < 0 || !cacheKeyRef.current) return;
+    adjustmentsRef.current = {
+      ...adjustmentsRef.current,
+      [index]: { x: viewBox.x, y: viewBox.y, width: viewBox.width, height: viewBox.height }
+    };
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(async () => {
+      if (!db || !cacheKeyRef.current) return;
+      const key = cacheKeyRef.current;
+      const existing = await readSegmentation(db, key);
+      if (!existing) return;
+      await writeSegmentation(db, key, {
+        boxes: existing.boxes,
+        layout: existing.layout,
+        strategy: existing.strategy,
+        imageWidth: existing.imageWidth,
+        imageHeight: existing.imageHeight,
+        adjustments: adjustmentsRef.current
+      });
+    }, 500);
+  }, [db]);
+
+  useEffect(() => () => {
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+  }, []);
+
   const applyViewBox = useCallback(
     (updater) => {
       setSelectedCharacter((prev) => {
         if (!prev) return prev;
-        return { ...prev, viewBox: fitViewBox(updater(prev.viewBox), prev.width, prev.height) };
+        const nextViewBox = fitViewBox(updater(prev.viewBox), prev.width, prev.height);
+        if (prev.grid && typeof prev.grid.index === 'number') {
+          scheduleSaveAdjustment(prev.grid.index, nextViewBox);
+        }
+        return { ...prev, viewBox: nextViewBox };
       });
     },
-    [setSelectedCharacter]
+    [setSelectedCharacter, scheduleSaveAdjustment]
   );
 
   const adjust = useCallback(
@@ -306,12 +364,32 @@ const PracticeView = ({
   const selectGridIndex = useCallback(
     (index) => {
       if (!grid || index < 0 || index >= grid.boxes.length) return false;
+      // 切字前把待保存的调整立刻写入，避免防抖被取消
+      if (saveTimerRef.current) {
+        clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = null;
+        if (db && cacheKeyRef.current) {
+          const key = cacheKeyRef.current;
+          readSegmentation(db, key).then((existing) => {
+            if (!existing) return;
+            writeSegmentation(db, key, {
+              boxes: existing.boxes,
+              layout: existing.layout,
+              strategy: existing.strategy,
+              imageWidth: existing.imageWidth,
+              imageHeight: existing.imageHeight,
+              adjustments: adjustmentsRef.current
+            });
+          });
+        }
+      }
       const box = grid.boxes[index];
+      const savedView = adjustmentsRef.current[index];
       setSelectedCharacter((prev) =>
         prev
           ? {
               ...prev,
-              viewBox: boxToViewBox(box),
+              viewBox: savedView ? { ...savedView } : boxToViewBox(box),
               grid: { boxes: grid.boxes, index }
             }
           : prev
