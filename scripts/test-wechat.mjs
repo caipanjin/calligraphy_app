@@ -7,7 +7,10 @@ import {
   pickFirstUrl,
   guessImageWidth,
   filterUsableImages,
-  isWeChatBlockedPage
+  isWeChatBlockedPage,
+  looksLikeSticker,
+  describeImageRisk,
+  readImageSize
 } from '../src/utils/wechatArticle.js';
 
 let passed = 0;
@@ -79,6 +82,53 @@ check('识别微信风控验证页', () => {
   assert.equal(isWeChatBlockedPage('<html>wappoc_appmsgcaptcha</html>'), true);
   assert.equal(isWeChatBlockedPage('<div>环境异常</div>'), true);
   assert.equal(isWeChatBlockedPage('<html><img src="https://mmbiz.qpic.cn/a/640?wx_fmt=jpeg"></html>'), false);
+});
+
+check('字帖判定：正常竖版作品图保留', () => {
+  assert.equal(looksLikeSticker({ width: 390, height: 493 }), true);
+  assert.equal(looksLikeSticker({ width: 1080, height: 865 }), true);
+  assert.equal(looksLikeSticker({ width: 2181, height: 1747 }), true);
+});
+
+check('字帖判定：过滤小图标与横幅', () => {
+  assert.equal(looksLikeSticker({ width: 272, height: 272 }), false);
+  assert.equal(looksLikeSticker({ width: 390, height: 220 }), false);
+  assert.equal(looksLikeSticker({ width: 100, height: 1200 }), false);
+});
+
+check('字帖判定：过滤正方形小图（头像/二维码/表格）', () => {
+  assert.equal(looksLikeSticker({ width: 390, height: 390 }), false);
+  assert.equal(looksLikeSticker({ width: 895, height: 895 }), false);
+  // 大尺寸正方形可能是大字帖，保留
+  assert.equal(looksLikeSticker({ width: 1200, height: 1200 }), true);
+});
+
+check('字帖判定：尺寸读不出时保守保留', () => {
+  assert.equal(looksLikeSticker({ width: 0, height: 0 }), true);
+});
+
+check('可疑原因文案', () => {
+  assert.equal(describeImageRisk({ width: 272, height: 272 }), '尺寸过小');
+  // 高度 220 < 300，先命中「尺寸过小」（判定顺序：尺寸优先于比例）
+  assert.equal(describeImageRisk({ width: 390, height: 220 }), '尺寸过小');
+  assert.equal(describeImageRisk({ width: 1600, height: 300 }), '比例异常');
+  assert.equal(describeImageRisk({ width: 390, height: 390 }), '正方形小图');
+  assert.equal(describeImageRisk({ width: 1080, height: 865 }), '');
+});
+
+check('从 data URL 读尺寸：PNG', () => {
+  // 1x1 透明 PNG 的宽高是 1x1
+  const png =
+    'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+  const size = readImageSize(png);
+  assert.equal(size.width, 1);
+  assert.equal(size.height, 1);
+  assert.equal(size.mime, 'image/png');
+});
+
+check('从 data URL 读尺寸：非法输入安全', () => {
+  assert.deepEqual(readImageSize(''), { width: 0, height: 0, mime: '' });
+  assert.deepEqual(readImageSize(null), { width: 0, height: 0, mime: '' });
 });
 
 // 真实文章回归（若存在抓取样本）

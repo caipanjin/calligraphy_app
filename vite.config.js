@@ -1,34 +1,84 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import https from 'node:https';
 
-// https://vitejs.dev/config/
-export default defineConfig({
-  plugins: [react()],
-  server: {
-    host: '0.0.0.0',
-    // 开发环境代理公众号页面与图片，绕过浏览器 CORS（仅 dev 生效；
-    // 原生 App 用 CapacitorHttp，不依赖此代理）
-    proxy: {
-      '/wx-proxy': {
-        target: 'https://mp.weixin.qq.com',
-        changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/wx-proxy/, ''),
-        // 用 configure 强制覆盖请求头（浏览器自带的 UA/Referer 会触发微信风控）
-        configure: (proxy) => {
-          proxy.on('proxyReq', (proxyReq) => {
-            proxyReq.setHeader(
-              'User-Agent',
-              'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36'
-            );
-            proxyReq.setHeader('Accept', 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8');
-            proxyReq.setHeader('Accept-Language', 'zh-CN,zh;q=0.9,en;q=0.8');
-            proxyReq.removeHeader('origin');
-            proxyReq.removeHeader('referer');
-            // 关键：去掉压缩协商，避免代理转发压缩流时被浏览器重复处理导致拿到不完整内容
-            proxyReq.removeHeader('accept-encoding');
-          });
+/**
+ * 公众号文章抓取中间件（仅开发环境使用）
+ *
+ * 为什么不用 vite 的 proxy：
+ * http-proxy 会把浏览器的 Cookie（rewardsn、wxtokenkey）、Referer、
+ * Sec-Fetch-* 等头一起透传给微信，服务端据此返回「精简页」。
+ * 这里用 node 原生 https 发一个干净的请求，完全可控。
+ *
+ * 请求头规律（实测，很反直觉但稳定）：
+ *   仅 UA                        → 200，2.6MB，含正文 ✓
+ *   UA + Accept + Accept-Lang    → 302 跳验证码页 ✗
+ *   UA + 全套头                   → 200 但只有压缩壳
+ * 所以这里只发 UA。
+ *
+ * ⚠️ 微信还有按 IP 的限流：短时间内多次抓取会返回 31652 字节的「精简页」
+ *    （HTTP 200，但没有 js_content）。冷却几分钟后可恢复。
+ *    前端已做检测与提示，并缓存已成功的文章。
+ */
+const fetchWechatArticle = (targetPath) =>
+  new Promise((resolve, reject) => {
+    const req = https.request(
+      {
+        hostname: 'mp.weixin.qq.com',
+        path: targetPath,
+        method: 'GET',
+        headers: {
+          'User-Agent':
+            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36'
         }
       },
+      (res) => {
+        // 跟随重定向
+        if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+          res.resume();
+          const location = res.headers.location;
+          const nextPath = location.startsWith('http')
+            ? new URL(location).pathname + (new URL(location).search || '')
+            : location;
+          fetchWechatArticle(nextPath).then(resolve, reject);
+          return;
+        }
+        const chunks = [];
+        res.on('data', (chunk) => chunks.push(chunk));
+        res.on('end', () => resolve({ status: res.statusCode, body: Buffer.concat(chunks), headers: res.headers }));
+        res.on('error', reject);
+      }
+    );
+    req.on('error', reject);
+    req.end();
+  });
+
+const wechatProxyPlugin = () => ({
+  name: 'wechat-proxy',
+  configureServer(server) {
+    server.middlewares.use('/wx-proxy', async (req, res) => {
+      try {
+        const result = await fetchWechatArticle(req.url || '/');
+        res.statusCode = result.status;
+        res.setHeader('Content-Type', 'text/html; charset=UTF-8');
+        // 微信会带 max-age=500 的缓存头；若浏览器缓存了「精简页」，
+        // 之后永远拿到旧的精简页，所以这里强制不缓存。
+        res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+        res.setHeader('Pragma', 'no-cache');
+        res.end(result.body);
+      } catch (error) {
+        res.statusCode = 502;
+        res.end(`proxy error: ${error.message}`);
+      }
+    });
+  }
+});
+
+export default defineConfig({
+  plugins: [react(), wechatProxyPlugin()],
+  server: {
+    host: '0.0.0.0',
+    proxy: {
       '/wx-img': {
         target: 'https://mmbiz.qpic.cn',
         changeOrigin: true,
@@ -36,10 +86,5 @@ export default defineConfig({
         headers: { Referer: 'https://mp.weixin.qq.com/' }
       }
     }
-  },
-  build: {
-    outDir: 'dist',
-    // OCR 的 wasm core 与语言包体积较大，不参与 chunk 拆分的告警阈值判断
-    chunkSizeWarningLimit: 1024
   }
 });

@@ -38,10 +38,10 @@ export const fetchText = async (url, { timeoutMs = 20000 } = {}) => {
   }
 
   // 浏览器开发环境：经 vite 代理转发，避开 CORS
-  // 注意：实测最简请求头反而能拿到正文，带完整浏览器头会被微信风控拦到验证码页。
-  // 真实的浏览器头由 vite 代理在服务端注入，这里只需一个简单的 Accept。
+  // 注意：实测**不能带任何自定义请求头**。带了 Accept 也会被微信返回精简页；
+  // 裸 fetch 才稳定拿到正文。真实的浏览器头由 vite 代理在服务端注入。
   const proxied = toDevProxyUrl(url);
-  const response = await fetch(proxied, { headers: { Accept: 'text/html' } });
+  const response = await fetch(proxied);
   return { status: response.status, text: await response.text() };
 };
 
@@ -62,8 +62,13 @@ export const fetchImageAsDataUrl = async (url, { timeoutMs = 25000 } = {}) => {
     if (response.status < 200 || response.status >= 300) {
       throw new Error(`下载失败(${response.status})`);
     }
-    const base64 = arrayBufferToBase64(response.data);
-    const mime = guessMimeFromUrl(url);
+    // CapacitorHttp 在 arraybuffer 模式下返回的是 base64 字符串；
+    // 某些平台/版本会返回真正的 ArrayBuffer，两种都要处理。
+    const base64 =
+      typeof response.data === 'string' ? response.data : arrayBufferToBase64(response.data);
+    // MIME 以文件魔数为准（微信 URL 的 wx_fmt 偶尔与实际格式不一致，
+    // 用错 MIME 会导致 WebView 无法解码图片）
+    const mime = sniffMimeFromBase64(base64) || guessMimeFromUrl(url);
     return `data:${mime};base64,${base64}`;
   }
 
@@ -98,10 +103,23 @@ const toDevProxyUrl = (url) => {
   return url;
 };
 
+/** 用文件头魔数判断真实图片格式（比 URL 参数可靠） */
+const sniffMimeFromBase64 = (base64) => {
+  if (typeof base64 !== 'string' || base64.length < 8) return '';
+  const head = base64.slice(0, 24);
+  if (head.startsWith('iVBORw0KGgo')) return 'image/png';        // 89 50 4E 47
+  if (head.startsWith('/9j/')) return 'image/jpeg';              // FF D8 FF
+  if (head.startsWith('R0lGOD')) return 'image/gif';             // GIF8
+  if (head.startsWith('UklGR')) return 'image/webp';             // RIFF....WEBP
+  return '';
+};
+
 const guessMimeFromUrl = (url) => {
   if (/wx_fmt=png/i.test(url)) return 'image/png';
   if (/wx_fmt=gif/i.test(url)) return 'image/gif';
   if (/wx_fmt=webp/i.test(url)) return 'image/webp';
+  // 公众号也用 wx_fmt=jpg（不是 jpeg）
+  if (/wx_fmt=jpe?g/i.test(url)) return 'image/jpeg';
   return 'image/jpeg';
 };
 

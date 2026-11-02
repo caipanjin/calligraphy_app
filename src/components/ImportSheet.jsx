@@ -7,8 +7,19 @@ import {
   FaExclamationTriangle,
   FaClipboard
 } from 'react-icons/fa';
-import { extractImageUrls, isWeChatArticleUrl, pickFirstUrl, isWeChatBlockedPage } from '../utils/wechatArticle';
+import {
+  extractImageUrls,
+  isWeChatArticleUrl,
+  pickFirstUrl,
+  isWeChatBlockedPage,
+  readImageSize,
+  looksLikeSticker
+} from '../utils/wechatArticle';
 import { fetchText, fetchImageAsDataUrl } from '../utils/httpClient';
+
+/** 同一篇文章的抓取结果缓存（微信限流严格，避免重复请求） */
+const articleCache = new Map();
+const CACHE_TTL = 10 * 60 * 1000;
 
 /**
  * 从公众号文章导入字帖
@@ -58,7 +69,49 @@ const ImportSheet = ({ onImport, onClose, initialUrl = '' }) => {
     setSelected(new Set());
 
     try {
-      const { status: httpStatus, text } = await fetchText(target);
+      // 命中缓存直接复用（微信对短时间内的重复请求会限流）
+      const cached = articleCache.get(target);
+      let usedCache = false;
+      let throttled = false;
+      let text = '';
+      let httpStatus = 200;
+
+      if (cached) {
+        text = cached.text;
+        usedCache = true;
+      } else {
+        const response = await fetchText(target);
+        text = response.text;
+        httpStatus = response.status;
+
+        // 微信对高频请求会返回「精简页」（只有引导下载/验证的内容），
+        // 特征：HTTP 200 但正文极短且不含 js_content。
+        // 微信限流的特征：HTTP 200 但没有 js_content（返回的是精简引导页）
+        const looksTiny = !text.includes('js_content');
+        if (httpStatus === 200 && looksTiny) {
+          throttled = true;
+          // 重试两次，间隔递增（实测限流窗口约 1 分钟，这里给到 ~4 秒，
+          // 再长会让用户等太久，剩下的靠提示让用户稍后再试）
+          for (const wait of [2000, 4000]) {
+            setProgress(`微信返回了精简页，正在重试…`);
+            await new Promise((resolve) => setTimeout(resolve, wait));
+            if (cancelledRef.current) return;
+            const retry = await fetchText(target);
+            if (retry.status === 200 && retry.text.includes('js_content')) {
+              text = retry.text;
+              httpStatus = retry.status;
+              throttled = false;
+              break;
+            }
+          }
+          setProgress('');
+        }
+
+        if (httpStatus === 200 && text.includes('js_content')) {
+          articleCache.set(target, { text, at: Date.now() });
+        }
+      }
+
       if (cancelledRef.current) return;
 
       if (httpStatus !== 200) {
@@ -69,14 +122,18 @@ const ImportSheet = ({ onImport, onClose, initialUrl = '' }) => {
 
       // 微信风控：请求过于频繁时会被跳转到验证页
       if (isWeChatBlockedPage(text)) {
-        setErrorMessage('微信暂时限制了访问（出现验证页）。请等几分钟再试，或直接在微信内保存图片导入。');
+        setErrorMessage('微信暂时限制了访问（出现验证页）。请等 1~2 分钟再试，或直接在微信内保存图片后从相册导入。');
         setStatus('error');
         return;
       }
 
       const urls = extractImageUrls(text);
       if (urls.length === 0) {
-        setErrorMessage('文章里没有找到图片，可能是纯文字或图片被加密。');
+        setErrorMessage(
+          throttled
+            ? '微信暂时限制了抓取（返回了精简页）。请等 1~2 分钟再点「抓取文章图片」，或在微信里长按图片保存到相册后从相册导入。'
+            : '文章里没有找到图片，可能是纯文字或图片被加密。'
+        );
         setStatus('error');
         return;
       }
@@ -90,6 +147,7 @@ const ImportSheet = ({ onImport, onClose, initialUrl = '' }) => {
       setImages(urls);
       setSelected(new Set(urls.map((_, i) => i))); // 默认全选
       setStatus('done');
+      if (usedCache) setErrorMessage('');
     } catch (error) {
       if (cancelledRef.current) return;
       const isCors = isWebLikeCors(error);
@@ -123,26 +181,48 @@ const ImportSheet = ({ onImport, onClose, initialUrl = '' }) => {
 
     setImporting(true);
     const results = [];
+    const seenHashes = new Set();
+    let skipped = 0;
     try {
       for (let i = 0; i < indices.length; i += 1) {
         const index = indices[i];
-        setProgress(`下载中 ${i + 1}/${indices.length}`);
+        setProgress(`下载并检查 ${i + 1}/${indices.length}`);
         try {
           const dataUrl = await fetchImageAsDataUrl(images[index]);
+
+          // 用内容哈希去重（同一张图可能以不同 URL 出现多次）
+          const hash = quickHash(dataUrl);
+          if (seenHashes.has(hash)) {
+            skipped += 1;
+            continue;
+          }
+
+          // 尺寸过滤：剔除头像、二维码、横幅等干扰图
+          const size = readImageSize(dataUrl);
+          if (!looksLikeSticker(size)) {
+            skipped += 1;
+            continue;
+          }
+
+          seenHashes.add(hash);
           results.push({ url: dataUrl, source: images[index] });
         } catch (error) {
-          // 单张失败不影响其他
           console.error('图片下载失败', images[index], error);
         }
         if (cancelledRef.current) break;
       }
       setProgress('');
       if (results.length === 0) {
-        setErrorMessage('图片全部下载失败，请稍后重试');
+        setErrorMessage('没有可用的字帖图片（可能都是头像/二维码等干扰图），请在其他文章重试');
         setStatus('error');
         return;
       }
-      onImport(results);
+      if (skipped > 0) {
+        // 通过回调让 App 显示提示
+        onImport(results, { skipped });
+      } else {
+        onImport(results, { skipped: 0 });
+      }
     } finally {
       setImporting(false);
     }
@@ -253,6 +333,18 @@ const ImportSheet = ({ onImport, onClose, initialUrl = '' }) => {
       </div>
     </>
   );
+};
+
+/** 对 data URL 做快速内容哈希（取长度 + 抽样 FNV-1a） */
+const quickHash = (dataUrl) => {
+  const len = dataUrl.length;
+  const stride = Math.max(1, Math.floor(len / 20000));
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < len; i += stride) {
+    hash ^= dataUrl.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return `${len.toString(36)}-${hash.toString(36)}`;
 };
 
 const isWebLikeCors = (error) => {

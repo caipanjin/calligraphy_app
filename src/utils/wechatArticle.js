@@ -42,6 +42,18 @@ export const extractImageUrls = (html) => {
   return urls;
 };
 
+/**
+ * 提取图片的「base key」用于去重
+ *
+ * 同一张图在公众号里可能出现多次，URL 只在尺寸段（/640 或 /0）或域名前缀上不同，
+ * 但路径主体（那一长串 hash）是相同的。按路径主体去重可避免重复导入。
+ */
+export const imageDedupKey = (url) => {
+  if (typeof url !== 'string') return '';
+  const match = url.match(/mmbiz\.qpic\.cn\/(?:[^/]+\/)?([^/?]+)/);
+  return match ? match[1] : url;
+};
+
 /** 判断抓到的内容是不是微信的验证/环境异常页（风控拦截） */
 export const isWeChatBlockedPage = (html) => {
   if (typeof html !== 'string') return false;
@@ -49,6 +61,77 @@ export const isWeChatBlockedPage = (html) => {
     /wappoc_appmsgcaptcha/.test(html) ||
     /环境异常|去验证|完成验证|请在微信客户端打开/.test(html)
   );
+};
+
+/**
+ * 从图片 data URL 中读出真实尺寸
+ * PNG / JPEG / GIF / WebP 均支持（只看文件头，不需要解码整张图）
+ */
+export const readImageSize = (dataUrl) => {
+  const match = typeof dataUrl === 'string' ? dataUrl.match(/^data:([^;]+);base64,(.+)$/) : null;
+  if (!match) return { width: 0, height: 0, mime: '' };
+  const mime = match[1];
+
+  const binary = atob(match[2].slice(0, 4096)); // 头部足够
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+
+  // PNG: 16..24 是宽高（大端）
+  if (bytes[0] === 0x89 && bytes[1] === 0x50) {
+    const width = (bytes[16] << 24) | (bytes[17] << 16) | (bytes[18] << 8) | bytes[19];
+    const height = (bytes[20] << 24) | (bytes[21] << 16) | (bytes[22] << 8) | bytes[23];
+    return { width, height, mime };
+  }
+  // GIF: 6..10 是小端宽高
+  if (bytes[0] === 0x47 && bytes[1] === 0x49) {
+    return { width: bytes[6] | (bytes[7] << 8), height: bytes[8] | (bytes[9] << 8), mime };
+  }
+  // JPEG: 扫描 SOF 段
+  if (bytes[0] === 0xff && bytes[1] === 0xd8) {
+    let i = 2;
+    while (i < bytes.length - 9) {
+      if (bytes[i] !== 0xff) { i += 1; continue; }
+      const marker = bytes[i + 1];
+      if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) {
+        const height = (bytes[i + 5] << 8) | bytes[i + 6];
+        const width = (bytes[i + 7] << 8) | bytes[i + 8];
+        return { width, height, mime };
+      }
+      const len = (bytes[i + 2] << 8) | bytes[i + 3];
+      i += 2 + len;
+    }
+  }
+  return { width: 0, height: 0, mime };
+};
+
+/**
+ * 判断一张图是否可能是「字帖正文图」
+ *
+ * 实测干扰图特征：
+ * - 272x272 小图标、390x220 横幅（尺寸/比例异常）
+ * - 正方形且尺寸偏小（390x390 的表格截图、头像、二维码）
+ * 字帖多为大尺寸、近似竖版的作品图。
+ *
+ * 尺寸读不出来时保守保留，交给用户判断。
+ */
+export const looksLikeSticker = ({ width, height }) => {
+  if (!width || !height) return true;                // 读不出尺寸：保留
+  if (width < 300 || height < 300) return false;     // 太小：图标 / 表情 / 缩略图
+  const ratio = width / height;
+  if (ratio > 3 || ratio < 0.33) return false;       // 极扁 / 极高：横幅 / 分隔线
+  // 正方形且不大（< 1000px）多为头像、二维码、表格截图
+  if (ratio === 1 && width < 1000) return false;
+  return true;
+};
+
+/** 给前端用的提示文案：说明这张图为什么被判为可疑（不直接删除，仅提示） */
+export const describeImageRisk = ({ width, height }) => {
+  if (!width || !height) return '';
+  if (width < 300 || height < 300) return '尺寸过小';
+  const ratio = width / height;
+  if (ratio > 3 || ratio < 0.33) return '比例异常';
+  if (ratio === 1 && width < 1000) return '正方形小图';
+  return '';
 };
 
 /** 判断是否为文章页链接（用于给出更明确的错误提示） */

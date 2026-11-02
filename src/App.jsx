@@ -362,7 +362,7 @@ const App = () => {
 
   // 从公众号导入的图片（已是 data URL）
   const handleImportImages = useCallback(
-    async (items) => {
+    async (items, options = {}) => {
       if (!items || items.length === 0) return;
       let next = recentRef.current;
       const imported = [];
@@ -377,7 +377,12 @@ const App = () => {
       setSelectedCharacter(null);
       setMode('practice');
       persistCurrent(imported[imported.length - 1].url);
-      showToast(`已导入 ${imported.length} 张字帖`);
+      const skipped = options && options.skipped ? options.skipped : 0;
+      showToast(
+        skipped > 0
+          ? `已导入 ${imported.length} 张，跳过 ${skipped} 张重复/干扰图`
+          : `已导入 ${imported.length} 张字帖`
+      );
     },
     [persistCurrent, showToast, updateRecent]
   );
