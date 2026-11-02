@@ -87,6 +87,7 @@ check('识别微信风控验证页', () => {
 check('字帖判定：正常竖版作品图保留', () => {
   assert.equal(looksLikeSticker({ width: 390, height: 493 }), true);
   assert.equal(looksLikeSticker({ width: 1080, height: 865 }), true);
+  assert.equal(looksLikeSticker({ width: 1280, height: 1706 }), true);
   assert.equal(looksLikeSticker({ width: 2181, height: 1747 }), true);
 });
 
@@ -94,6 +95,8 @@ check('字帖判定：过滤小图标与横幅', () => {
   assert.equal(looksLikeSticker({ width: 272, height: 272 }), false);
   assert.equal(looksLikeSticker({ width: 390, height: 220 }), false);
   assert.equal(looksLikeSticker({ width: 100, height: 1200 }), false);
+  // 横版封面（比例 1.78）应被过滤
+  assert.equal(looksLikeSticker({ width: 1280, height: 719 }), false);
 });
 
 check('字帖判定：过滤正方形小图（头像/二维码/表格）', () => {

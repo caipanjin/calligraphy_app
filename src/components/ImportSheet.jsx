@@ -13,7 +13,9 @@ import {
   pickFirstUrl,
   isWeChatBlockedPage,
   readImageSize,
-  looksLikeSticker
+  looksLikeSticker,
+  computeDHash,
+  isSameImage
 } from '../utils/wechatArticle';
 import { fetchText, fetchImageAsDataUrl } from '../utils/httpClient';
 
@@ -181,7 +183,7 @@ const ImportSheet = ({ onImport, onClose, initialUrl = '' }) => {
 
     setImporting(true);
     const results = [];
-    const seenHashes = new Set();
+    const dhashes = [];
     let skipped = 0;
     try {
       for (let i = 0; i < indices.length; i += 1) {
@@ -190,22 +192,41 @@ const ImportSheet = ({ onImport, onClose, initialUrl = '' }) => {
         try {
           const dataUrl = await fetchImageAsDataUrl(images[index]);
 
-          // 用内容哈希去重（同一张图可能以不同 URL 出现多次）
-          const hash = quickHash(dataUrl);
-          if (seenHashes.has(hash)) {
-            skipped += 1;
-            continue;
-          }
-
-          // 尺寸过滤：剔除头像、二维码、横幅等干扰图
+          // 1) 尺寸过滤：剔除头像、二维码、横幅等干扰图
           const size = readImageSize(dataUrl);
           if (!looksLikeSticker(size)) {
             skipped += 1;
             continue;
           }
 
-          seenHashes.add(hash);
-          results.push({ url: dataUrl, source: images[index] });
+          // 2) 视觉去重：公众号会把同一幅字帖导出成多个尺寸/裁切，
+          //    字节哈希去不掉，必须用感知哈希（dHash）
+          const image = await loadImageForHash(dataUrl);
+          if (!image) {
+            skipped += 1;
+            continue;
+          }
+          const hash = computeDHash(image);
+          const duplicateIndex = dhashes.findIndex((existing) => isSameImage(existing, hash));
+          if (duplicateIndex >= 0) {
+            // 已有视觉相同的图：保留分辨率更高的那一张
+            const existing = results[duplicateIndex];
+            const existingPixels = (existing.width || 0) * (existing.height || 0);
+            const currentPixels = size.width * size.height;
+            if (currentPixels > existingPixels) {
+              results[duplicateIndex] = {
+                url: dataUrl,
+                source: images[index],
+                width: size.width,
+                height: size.height
+              };
+            }
+            skipped += 1;
+            continue;
+          }
+          dhashes.push(hash);
+
+          results.push({ url: dataUrl, source: images[index], width: size.width, height: size.height });
         } catch (error) {
           console.error('图片下载失败', images[index], error);
         }
@@ -334,6 +355,15 @@ const ImportSheet = ({ onImport, onClose, initialUrl = '' }) => {
     </>
   );
 };
+
+/** 把 data URL 解码成 Image（用于计算感知哈希） */
+const loadImageForHash = (dataUrl) =>
+  new Promise((resolve) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => resolve(null);
+    image.src = dataUrl;
+  });
 
 /** 对 data URL 做快速内容哈希（取长度 + 抽样 FNV-1a） */
 const quickHash = (dataUrl) => {

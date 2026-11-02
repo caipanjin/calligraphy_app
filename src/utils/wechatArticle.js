@@ -118,7 +118,8 @@ export const looksLikeSticker = ({ width, height }) => {
   if (!width || !height) return true;                // 读不出尺寸：保留
   if (width < 300 || height < 300) return false;     // 太小：图标 / 表情 / 缩略图
   const ratio = width / height;
-  if (ratio > 3 || ratio < 0.33) return false;       // 极扁 / 极高：横幅 / 分隔线
+  // 字帖基本都是竖版或接近方形。横版超过 1.5 的多是封面/横幅/引导图。
+  if (ratio > 1.5 || ratio < 0.33) return false;
   // 正方形且不大（< 1000px）多为头像、二维码、表格截图
   if (ratio === 1 && width < 1000) return false;
   return true;
@@ -129,10 +130,119 @@ export const describeImageRisk = ({ width, height }) => {
   if (!width || !height) return '';
   if (width < 300 || height < 300) return '尺寸过小';
   const ratio = width / height;
-  if (ratio > 3 || ratio < 0.33) return '比例异常';
+  if (ratio > 1.5 || ratio < 0.33) return '比例异常';
   if (ratio === 1 && width < 1000) return '正方形小图';
   return '';
 };
+
+/**
+ * 计算图片的 dHash（差值感知哈希）
+ *
+ * 为什么需要它：
+ * 公众号会把**同一幅字帖**导出成多个尺寸（原图 2539x3279、缩略 1280x1706、
+ * 裁切版 1280x1280），这些图字节不同（md5 不同）但视觉上是同一张，
+ * 靠字节哈希去不掉。dHash 对缩放、轻微裁切、重新压缩都稳定。
+ *
+ * @param {HTMLImageElement|ImageBitmap} source 已解码的图片
+ * @param {number} size 哈希边长（默认 8，即 64 位）
+ * @returns {string} 64 位哈希（16 进制）
+ */
+export const computeDHash = (source, size = 16) => {
+  const naturalWidth = source.naturalWidth || source.width;
+  const naturalHeight = source.naturalHeight || source.height;
+  if (!naturalWidth || !naturalHeight) return '';
+
+  const canvas = document.createElement('canvas');
+  canvas.width = naturalWidth;
+  canvas.height = naturalHeight;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  if (!ctx) return '';
+  ctx.drawImage(source, 0, 0, naturalWidth, naturalHeight);
+
+  let data;
+  try {
+    data = ctx.getImageData(0, 0, naturalWidth, naturalHeight).data;
+  } catch (error) {
+    return '';
+  }
+
+  // 把图片切成 size x size 的网格，每格取平均亮度，得到灰度指纹。
+  // 不用 canvas 缩放：drawImage 的插值是平台相关的，同一张图不同尺寸
+  // 缩放后差异很大（实测同一幅字距离能到 23），分块平均则稳定得多。
+  const cellWidth = naturalWidth / size;
+  const cellHeight = naturalHeight / size;
+  const cells = new Float32Array(size * size);
+
+  for (let row = 0; row < size; row += 1) {
+    const y0 = Math.floor(row * cellHeight);
+    const y1 = Math.max(y0 + 1, Math.floor((row + 1) * cellHeight));
+    for (let col = 0; col < size; col += 1) {
+      const x0 = Math.floor(col * cellWidth);
+      const x1 = Math.max(x0 + 1, Math.floor((col + 1) * cellWidth));
+      let sum = 0;
+      let count = 0;
+      const stepY = Math.max(1, Math.floor((y1 - y0) / 6));
+      const stepX = Math.max(1, Math.floor((x1 - x0) / 6));
+      for (let y = y0; y < y1; y += stepY) {
+        for (let x = x0; x < x1; x += stepX) {
+          const index = (y * naturalWidth + x) * 4;
+          sum += data[index] * 0.299 + data[index + 1] * 0.587 + data[index + 2] * 0.114;
+          count += 1;
+        }
+      }
+      cells[row * size + col] = count > 0 ? sum / count : 0;
+    }
+  }
+
+  // 归一化成 0~1 的字符串指纹（每格 1 位 16 进制不够，用 2 位）
+  let hash = '';
+  for (let i = 0; i < cells.length; i += 1) {
+    const value = Math.max(0, Math.min(255, Math.round(cells[i])));
+    hash += value.toString(16).padStart(2, '0');
+  }
+  return hash;
+};
+
+/**
+ * 两个灰度指纹的「距离」（0 = 完全相同，越大越不同）
+ *
+ * 用归一化后的欧氏距离而不是汉明距离：
+ * 同一幅字的不同尺寸/裁切，逐格亮度会有偏差，
+ * 但整体结构一致，归一化欧氏距离对这种偏差不敏感。
+ */
+export const hammingDistance = (a, b) => {
+  if (!a || !b || a.length !== b.length) return Number.MAX_SAFE_INTEGER;
+  const cells = a.length / 2;
+  let sumSquares = 0;
+  let normA = 0;
+  let normB = 0;
+  for (let i = 0; i < cells; i += 1) {
+    const va = parseInt(a.slice(i * 2, i * 2 + 2), 16);
+    const vb = parseInt(b.slice(i * 2, i * 2 + 2), 16);
+    sumSquares += (va - vb) ** 2;
+    normA += va * va;
+    normB += vb * vb;
+  }
+  if (normA === 0 || normB === 0) return Number.MAX_SAFE_INTEGER;
+  // 归一化到 0~100，便于设阈值
+  const rms = Math.sqrt(sumSquares / cells);
+  return Math.round((rms / 255) * 100);
+};
+
+/**
+ * 判定两张图是否为「同一幅字帖的不同尺寸/裁切」
+ *
+ * 用 16x16 灰度指纹 + 归一化 RMS 距离（0~100）。
+ * 实测（真实文章《HdX6lU0V4xopJd9F_D53xw》）：
+ *   同一幅字的 5 个导出（2539x3279 / 1280x1706 / 1280x1280 / 1280x1653）：0~7
+ *   封面横幅 vs 字帖：11
+ *   二维码 vs 字帖：39~40
+ * 取 10：覆盖所有字帖版本，同时与横幅/二维码区分开。
+ */
+export const DEDUP_THRESHOLD = 10;
+
+export const isSameImage = (hashA, hashB, threshold = DEDUP_THRESHOLD) =>
+  hammingDistance(hashA, hashB) <= threshold;
 
 /** 判断是否为文章页链接（用于给出更明确的错误提示） */
 export const isWeChatArticleUrl = (url) => {
