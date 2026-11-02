@@ -18,8 +18,9 @@ import {
   getPreviousCharacterPosition,
   isHiddenPosition
 } from '../utils/charNav';
-import { readSegmentation } from '../utils/segmentCache';
+import { readSegmentation, readSettings, writeSegmentation } from '../utils/segmentCache';
 import { hashImageData } from '../utils/imageHash';
+import { segmentCharacters } from '../utils/segment';
 
 // 缩放因子
 const ZOOM_FACTOR = 1.05;
@@ -117,6 +118,37 @@ const PracticeView = ({
         }
         if (found && found.layout) break;
       }
+      if (cancelled) return;
+
+      // 没有任何缓存：按该字帖已保存的设置（版面模式 / 是否带格子线）自动切分一次
+      if (!found) {
+        const settings = await readSettings(db, hashImageData(image));
+        if (cancelled) return;
+        const desiredLayout = settings && settings.layout ? settings.layout : 'auto';
+        const desiredGrid = Boolean(settings && settings.hasGrid);
+
+        try {
+          const segmentation = await segmentCharacters(image, {
+            layout: desiredLayout,
+            hasGrid: desiredGrid
+          });
+          if (cancelled) return;
+          if (segmentation && !segmentation.failed && segmentation.boxes.length > 0) {
+            found = { boxes: segmentation.boxes, layout: segmentation.layout || 'vertical' };
+            // 写回缓存，下次直接读取
+            writeSegmentation(db, `${prefix}${desiredLayout}:${desiredGrid ? 'grid' : 'free'}`, {
+              boxes: segmentation.boxes,
+              layout: segmentation.layout,
+              strategy: segmentation.strategy,
+              imageWidth: segmentation.imageWidth,
+              imageHeight: segmentation.imageHeight
+            });
+          }
+        } catch (error) {
+          // 自动切分失败时静默退回手动点选
+        }
+      }
+
       if (!cancelled) {
         setSavedBoxes(found ? found.boxes : null);
         setSavedLayout(found && found.layout ? found.layout : 'vertical');
