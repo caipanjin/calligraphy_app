@@ -556,6 +556,13 @@ const PracticeView = ({
 
       {!isCharMode && (
         <div className="practice__body">
+          <div className="stage-actions">
+            <button className="btn btn--ghost btn--block" onClick={onOpenSegment}>
+              <FaTh size={13} />
+              自动切字，逐字临摹
+            </button>
+          </div>
+
           <div className="stage-frame" ref={frameRef}>
             <Magnifier
               imageSrc={image}
@@ -610,12 +617,6 @@ const PracticeView = ({
             </div>
           )}
 
-          <div className="stage-actions">
-            <button className="btn btn--ghost btn--block" onClick={onOpenSegment}>
-              <FaTh size={13} />
-              自动切字，逐字临摹
-            </button>
-          </div>
         </div>
       )}
 

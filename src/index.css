@@ -709,7 +709,7 @@ button {
 
 /* 图片模式底部操作区 */
 .stage-actions {
-  padding: 12px 0 0;
+  padding: 0 0 12px;
 }
 
 /* 单字模式的全景缩略导航 */

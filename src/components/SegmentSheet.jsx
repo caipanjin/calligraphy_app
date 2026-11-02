@@ -130,6 +130,10 @@ const SegmentSheet = ({ image, db, onSelectCharacter, onClose }) => {
         setStatus(empty ? 'empty' : 'done');
 
         if (!empty) {
+          // 点「重新切分」时清掉之前的手动调整，否则重开时手动记录会盖掉新结果
+          if (attempt > 0) {
+            deleteSegmentation(db, `${cacheKey}:manual`);
+          }
           writeSegmentation(db, cacheKey, {
             boxes: segmentation.boxes,
             layout: segmentation.layout,
