@@ -6,8 +6,13 @@ import SegmentSheet from './components/SegmentSheet';
 import SettingsView from './components/SettingsView';
 import Toast from './components/Toast';
 import { hashImageData } from './utils/imageHash';
-import { deleteSegmentationByPrefix, clearSegmentations } from './utils/segmentCache';
-import { deleteImagePractice, clearAllPractice } from './utils/practiceStore';
+import { deleteSegmentationByPrefix, clearSegmentations, readSegmentation } from './utils/segmentCache';
+import {
+  deleteImagePractice,
+  clearAllPractice,
+  readImagePractice,
+  countPracticed
+} from './utils/practiceStore';
 import { FaImages, FaCog, FaPlus } from 'react-icons/fa';
 
 const DB_NAME = 'calligraphyImages';
@@ -48,10 +53,20 @@ const App = () => {
   const [mode, setMode] = useState('library');
   const [selectedCharacter, setSelectedCharacter] = useState(null);
   const [showSegment, setShowSegment] = useState(false);
+  // 每张字帖的练习进度：{ [url]: { practiced, total } }
+  const [progressMap, setProgressMap] = useState({});
   // 切分结果变更的版本号：切分面板改动后，临摹页据此重新读取已存网格
   const [gridVersion, setGridVersion] = useState(0);
   const [deleteIndex, setDeleteIndex] = useState(null);
   const [toast, setToast] = useState('');
+  // 打开字帖时是否跳到上次练到的字（默认开启）
+  const [resumePractice, setResumePractice] = useState(() => {
+    try {
+      return localStorage.getItem('calligraphy:resume') !== 'off';
+    } catch (error) {
+      return true;
+    }
+  });
   const [theme, setTheme] = useState(() => {
     try {
       return localStorage.getItem(THEME_STORAGE_KEY) || 'auto';
@@ -342,6 +357,46 @@ const App = () => {
     [image, persistCurrent]
   );
 
+  // 计算每张字帖的练习进度（已练字数 / 切分总字数）
+  const refreshProgress = useCallback(async () => {
+    if (!db) return;
+    const items = recentRef.current || [];
+    const next = {};
+
+    for (const item of items) {
+      const imageHash = hashImageData(item.url);
+      // 总字数：从切分缓存里取（优先 manual，其次任意版面）
+      let total = 0;
+      const manualKeys = ['vertical:free', 'vertical:grid', 'auto:free', 'auto:grid'];
+      for (const variant of manualKeys) {
+        const manual = await readSegmentation(db, `${imageHash}:${variant}:manual`);
+        if (manual && manual.boxes && manual.boxes.length > 0) {
+          total = manual.boxes.length;
+          break;
+        }
+      }
+      if (!total) {
+        for (const variant of manualKeys) {
+          const auto = await readSegmentation(db, `${imageHash}:${variant}`);
+          if (auto && auto.boxes && auto.boxes.length > 0) {
+            total = auto.boxes.length;
+            break;
+          }
+        }
+      }
+      const records = await readImagePractice(db, imageHash);
+      next[item.url] = { practiced: countPracticed(records), total };
+    }
+
+    setProgressMap(next);
+  }, [db]);
+
+  // 进入字帖库或列表变化时刷新进度
+  useEffect(() => {
+    if (mode !== 'library' || !db) return;
+    refreshProgress();
+  }, [mode, db, recentImages, refreshProgress]);
+
   const handleBackToLibrary = useCallback(() => {
     setMode('library');
     setSelectedCharacter(null);
@@ -377,6 +432,7 @@ const App = () => {
           onSwitchImage={handleSwitchImage}
           db={db}
           gridVersion={gridVersion}
+          resumePractice={resumePractice}
         />
       ) : (
         <>
@@ -402,6 +458,12 @@ const App = () => {
                 stickerCount={recentImages.length}
                 maxStickers={MAX_STICKERS}
                 onClearAll={handleClearAll}
+                db={db}
+                resumePractice={resumePractice}
+                onChangeResume={(value) => {
+                  setResumePractice(value);
+                  try { localStorage.setItem('calligraphy:resume', value ? 'on' : 'off'); } catch (error) { /* 忽略 */ }
+                }}
               />
             ) : (
               <Library
@@ -410,6 +472,7 @@ const App = () => {
                 onOpen={handleOpenSticker}
                 onRequestDelete={setDeleteIndex}
                 onPickFiles={handlePickFiles}
+                progressMap={progressMap}
               />
             )}
           </main>

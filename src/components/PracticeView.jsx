@@ -22,6 +22,7 @@ import { readSegmentation, readSettings, writeSegmentation } from '../utils/segm
 import {
   recordPractice,
   readPractice,
+  readLastPracticed,
   PRACTICE_THRESHOLD_MS
 } from '../utils/practiceStore';
 import { hashImageData } from '../utils/imageHash';
@@ -73,7 +74,8 @@ const PracticeView = ({
   recentImages = [],
   onSwitchImage,
   db,
-  gridVersion = 0
+  gridVersion = 0,
+  resumePractice = true
 }) => {
   const frameRef = useRef(null);
   const canvasRef = useRef(null);
@@ -90,6 +92,11 @@ const PracticeView = ({
   // 当前字练过次数（用于顶栏展示）
   const [practiceCount, setPracticeCount] = useState(0);
   const practiceTimerRef = useRef(null);
+  const resumeAppliedRef = useRef(false);
+  // 续练自动进入的那一次不计入练习次数（用户并未真正练习）
+  const skipNextCountRef = useRef(false);
+  // 待续练的字索引（等框渲染好后跳转）
+  const [pendingResumeIndex, setPendingResumeIndex] = useState(null);
   // 当前字帖的缓存键与已保存的单字取景调整
   const cacheKeyRef = useRef('');
   const adjustmentsRef = useRef({});
@@ -207,6 +214,15 @@ const PracticeView = ({
         cacheKeyRef.current =
           (found && found.cacheKey) || `${prefix}${desiredLayout}:${desiredGrid ? 'grid' : 'free'}`;
         adjustmentsRef.current = (found && found.adjustments) || {};
+
+        // 续练：自动跳到上次练到的字（每次进入该字帖只做一次）
+        if (resumePractice && found && found.boxes && found.boxes.length > 0 && !resumeAppliedRef.current) {
+          resumeAppliedRef.current = true;
+          const last = await readLastPracticed(db, hashImageData(image));
+          if (!cancelled && last && last.index >= 0 && last.index < found.boxes.length) {
+            setPendingResumeIndex(last.index);
+          }
+        }
       }
     };
 
@@ -215,6 +231,24 @@ const PracticeView = ({
       cancelled = true;
     };
   }, [image, db, gridVersion]);
+
+  // 续练：待跳转的索引就绪后，自动进入该字
+  useEffect(() => {
+    if (pendingResumeIndex === null || !savedBoxes || savedBoxes.length === 0) return;
+    if (selectedCharacter) {
+      setPendingResumeIndex(null);
+      return;
+    }
+    const box = savedBoxes[pendingResumeIndex];
+    if (!box) {
+      setPendingResumeIndex(null);
+      return;
+    }
+    skipNextCountRef.current = true;
+    handleSavedBoxClick(box, pendingResumeIndex);
+    setPendingResumeIndex(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingResumeIndex, savedBoxes]);
 
   /* ---------------- 练习记录 ---------------- */
 
@@ -245,6 +279,11 @@ const PracticeView = ({
 
     practiceTimerRef.current = setTimeout(async () => {
       if (cancelled) return;
+      // 续练自动进入的那次直接跳过，避免「打开就 +1」
+      if (skipNextCountRef.current) {
+        skipNextCountRef.current = false;
+        return;
+      }
       const saved = await recordPractice(db, imageHash, gridIndex);
       if (!cancelled && saved) setPracticeCount(saved.count || 0);
     }, PRACTICE_THRESHOLD_MS);
@@ -414,6 +453,8 @@ const PracticeView = ({
   const selectGridIndex = useCallback(
     (index) => {
       if (!grid || index < 0 || index >= grid.boxes.length) return false;
+      // 用户主动切字 → 之后的停留都应正常计数
+      skipNextCountRef.current = false;
       // 切字前把待保存的调整立刻写入，避免防抖被取消
       if (saveTimerRef.current) {
         clearTimeout(saveTimerRef.current);

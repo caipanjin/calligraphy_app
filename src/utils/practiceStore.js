@@ -123,6 +123,26 @@ export const readImagePractice = (db, imageHash) =>
     request.onerror = () => resolve(new Map());
   });
 
+/** 读取「上次练到的字」：lastPracticedAt 最大的那条 */
+export const readLastPracticed = (db, imageHash) =>
+  new Promise((resolve) => {
+    const request = withStore(db, PRACTICE_STORE, 'readonly', (store) => store.getAll());
+    if (!request) {
+      resolve(null);
+      return;
+    }
+    request.onsuccess = () => {
+      const records = (request.result || []).filter((record) => record.imageHash === imageHash);
+      if (records.length === 0) {
+        resolve(null);
+        return;
+      }
+      records.sort((a, b) => (b.lastPracticedAt || 0) - (a.lastPracticedAt || 0));
+      resolve(records[0]);
+    };
+    request.onerror = () => resolve(null);
+  });
+
 /** 读取单条记录 */
 export const readPractice = (db, imageHash, index) =>
   new Promise((resolve) => {

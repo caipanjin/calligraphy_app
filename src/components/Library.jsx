@@ -20,7 +20,7 @@ const formatSize = (bytes) => {
 /**
  * 字帖库：网格卡片 + 添加入口 + 空状态
  */
-const Library = ({ images, currentImage, onOpen, onRequestDelete, onPickFiles }) => {
+const Library = ({ images, currentImage, onOpen, onRequestDelete, onPickFiles, progressMap = {} }) => {
   return (
     <>
       {images.length === 0 ? (
@@ -55,6 +55,7 @@ const Library = ({ images, currentImage, onOpen, onRequestDelete, onPickFiles })
             {images.map((item, index) => {
               const isCurrent = item.url === currentImage;
               const date = formatDate(item.addedAt);
+              const progress = progressMap[item.url];
               return (
                 <article
                   key={`${item.url.slice(-24)}-${index}`}
@@ -74,6 +75,19 @@ const Library = ({ images, currentImage, onOpen, onRequestDelete, onPickFiles })
                         {date ? `${date} 上传` : `字帖 ${String(index + 1).padStart(2, '0')}`}
                       </div>
                       <div className="section-head__hint">{formatSize(item.size)}</div>
+                      {progress && progress.total > 0 && (
+                        <div className="poster-progress">
+                          <div className="poster-progress__bar">
+                            <span
+                              className="poster-progress__fill"
+                              style={{ width: `${Math.round((progress.practiced / progress.total) * 100)}%` }}
+                            />
+                          </div>
+                          <span className="poster-progress__text">
+                            {progress.practiced}/{progress.total}
+                          </span>
+                        </div>
+                      )}
                     </div>
                     <button
                       className="poster-card__more"

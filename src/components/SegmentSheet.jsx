@@ -20,6 +20,7 @@ import {
   writeSettings
 } from '../utils/segmentCache';
 import { removeBox, mergeBoxes, splitBox, findNearestBoxIndex } from '../utils/boxEdit';
+import { deleteImagePractice, readImagePractice } from '../utils/practiceStore';
 
 // 字帖一律竖排，不再提供版面切换
 const LAYOUT_OPTIONS = [{ value: 'vertical', label: '竖排' }];
@@ -41,6 +42,9 @@ const SegmentSheet = ({ image, db, onSelectCharacter, onClose }) => {
   const [selectedIndex, setSelectedIndex] = useState(null);
   // 用户手动修改过的框（非 null 时优先于自动结果，且不写回缓存）
   const [editedBoxes, setEditedBoxes] = useState(null);
+  // 破坏性操作前的确认（会重置练习记录）
+  const [pendingAction, setPendingAction] = useState(null);
+  const [practicedCount, setPracticedCount] = useState(0);
 
   // 先恢复这张字帖上次的版面设置与「是否带格子线」
   useEffect(() => {
@@ -164,6 +168,42 @@ const SegmentSheet = ({ image, db, onSelectCharacter, onClose }) => {
 
   const handleRetry = useCallback(() => setAttempt((value) => value + 1), []);
 
+  /** 若该字帖已有练习记录，先确认（会重置记录） */
+  const confirmIfPracticed = useCallback(
+    async (action) => {
+      if (!db || !image) {
+        action();
+        return;
+      }
+      const records = await readImagePractice(db, hashImageData(image));
+      let practiced = 0;
+      records.forEach((record) => {
+        if (record && record.count > 0) practiced += 1;
+      });
+      if (practiced > 0) {
+        setPracticedCount(practiced);
+        setPendingAction(() => action);
+        return;
+      }
+      action();
+    },
+    [db, image]
+  );
+
+  // 编辑框后清掉该字帖的练习记录（索引已错位）
+  const clearPracticeForImage = useCallback(() => {
+    if (db && image) deleteImagePractice(db, hashImageData(image));
+  }, [db, image]);
+
+  const runPendingAction = useCallback(async () => {
+    const action = pendingAction;
+    setPendingAction(null);
+    if (db && image) {
+      await deleteImagePractice(db, hashImageData(image));
+    }
+    if (action) action();
+  }, [pendingAction, db, image]);
+
   const handleBoxClick = (box, index) => {
     if (editing) {
       setSelectedIndex((current) => (current === index ? null : index));
@@ -221,19 +261,33 @@ const SegmentSheet = ({ image, db, onSelectCharacter, onClose }) => {
 
   const handleDelete = () => {
     if (selectedIndex === null) return;
-    applyBoxes(removeBox(boxes, selectedIndex));
+    const index = selectedIndex;
+    confirmIfPracticed(() => {
+      // 框结构变了，之前按索引存的练习记录会错位 → 一并清空
+      clearPracticeForImage();
+      applyBoxes(removeBox(boxes, index));
+    });
   };
 
   const handleMerge = () => {
     if (selectedIndex === null) return;
     const neighbor = findNearestBoxIndex(boxes, selectedIndex);
     if (neighbor < 0) return;
-    applyBoxes(mergeBoxes(boxes, selectedIndex, neighbor));
+    const index = selectedIndex;
+    confirmIfPracticed(() => {
+      clearPracticeForImage();
+      applyBoxes(mergeBoxes(boxes, index, neighbor));
+    });
   };
 
   const handleSplit = () => {
     if (selectedIndex === null) return;
-    applyBoxes(splitBox(boxes, selectedIndex, result.layout === 'vertical'));
+    const index = selectedIndex;
+    const vertical = result && result.layout === 'vertical';
+    confirmIfPracticed(() => {
+      clearPracticeForImage();
+      applyBoxes(splitBox(boxes, index, vertical));
+    });
   };
 
   const handleResetEdit = () => {
@@ -376,7 +430,7 @@ const SegmentSheet = ({ image, db, onSelectCharacter, onClose }) => {
         ) : (
           <div className="sheet__footer">
             {status !== 'loading' && (
-              <button className="btn btn--ghost" onClick={handleRetry}>
+              <button className="btn btn--ghost" onClick={() => confirmIfPracticed(handleRetry)}>
                 <FaRedo size={13} />
                 重新切分
               </button>
@@ -388,6 +442,26 @@ const SegmentSheet = ({ image, db, onSelectCharacter, onClose }) => {
           </div>
         )}
       </div>
+
+      {pendingAction && (
+        <div className="modal-backdrop" onClick={() => setPendingAction(null)}>
+          <div className="modal" onClick={(event) => event.stopPropagation()}>
+            <h3 className="modal__title">会重置练习记录</h3>
+            <p className="modal__desc">
+              这张字帖已练过 {practicedCount} 个字。重新切分或调整框的位置，
+              之前的练习记录会因为字的位置变化而错位，将被清除。
+            </p>
+            <div className="modal__actions">
+              <button className="btn btn--ghost" onClick={() => setPendingAction(null)}>
+                取消
+              </button>
+              <button className="btn btn--danger" onClick={runPendingAction}>
+                继续并清除
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 };

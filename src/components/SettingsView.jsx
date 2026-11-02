@@ -1,5 +1,6 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { FaTrashAlt, FaInfoCircle, FaRegLightbulb } from 'react-icons/fa';
+import { readPracticeStats } from '../utils/practiceStore';
 
 const THEME_OPTIONS = [
   { value: 'auto', label: '跟随系统' },
@@ -8,7 +9,28 @@ const THEME_OPTIONS = [
 ];
 
 /** 设置页：外观与数据 */
-const SettingsView = ({ theme, onChangeTheme, stickerCount, maxStickers, onClearAll }) => {
+const SettingsView = ({
+  theme,
+  onChangeTheme,
+  stickerCount,
+  maxStickers,
+  onClearAll,
+  resumePractice = true,
+  onChangeResume,
+  db
+}) => {
+  const [stats, setStats] = useState({ today: 0, week: 0, total: 0 });
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!db) return undefined;
+    readPracticeStats(db).then((value) => {
+      if (!cancelled) setStats(value);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [db]);
   return (
     <>
       <div className="settings-group">
@@ -27,6 +49,47 @@ const SettingsView = ({ theme, onChangeTheme, stickerCount, maxStickers, onClear
                 </button>
               ))}
             </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="settings-group">
+        <h2 className="settings-group__title">练习</h2>
+        <div className="settings-card">
+          <div className="settings-row">
+            <span className="settings-row__label">打开字帖时继续上次</span>
+            <div className="settings-segmented">
+              <button
+                className={resumePractice ? 'is-active' : ''}
+                onClick={() => onChangeResume && onChangeResume(true)}
+              >
+                开
+              </button>
+              <button
+                className={!resumePractice ? 'is-active' : ''}
+                onClick={() => onChangeResume && onChangeResume(false)}
+              >
+                关
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="settings-group">
+        <h2 className="settings-group__title">练习统计</h2>
+        <div className="settings-card">
+          <div className="settings-row">
+            <span className="settings-row__label">今日已练</span>
+            <span className="settings-row__value">{stats.today} 次</span>
+          </div>
+          <div className="settings-row">
+            <span className="settings-row__label">近 7 天</span>
+            <span className="settings-row__value">{stats.week} 次</span>
+          </div>
+          <div className="settings-row">
+            <span className="settings-row__label">累计练过的字</span>
+            <span className="settings-row__value">{stats.total} 字</span>
           </div>
         </div>
       </div>

@@ -366,6 +366,37 @@ button {
   inset: -5px;
 }
 
+/* 字帖卡片上的练习进度 */
+.poster-progress {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.poster-progress__bar {
+  flex: 1;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--surface-3);
+  overflow: hidden;
+}
+
+.poster-progress__fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accent);
+  transition: width 0.3s ease;
+}
+
+.poster-progress__text {
+  font-size: 10.5px;
+  color: var(--ink-3);
+  letter-spacing: 0.02em;
+  flex-shrink: 0;
+}
+
 .add-card {
   display: flex;
   flex-direction: column;
