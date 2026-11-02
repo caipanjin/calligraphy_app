@@ -1002,18 +1002,24 @@ export const segmentCharacters = async (imageSrc, options = {}) => {
       columnDetail.push({ width: col.end - col.start, bands: charBands.length, sizes: charBands.map((b) => b.end - b.start) });
       charBands.forEach((band, bandIndex) => {
         // 本字在「自己这一行范围内」到左右相邻墨迹的实际空隙
+        // 这一侧到最近一段「非本字墨迹」的空白宽度
+        // 直接量「紧邻边界的空白」；若边界处就是墨迹，说明字已贴着边界，扩展受限
         const scanGap = (fromX, step) => {
           let x = fromX;
+          let blank = 0;
           while (x >= 0 && x < W) {
             let has = false;
             for (let y = band.start; y < band.end; y += 1) {
               if (ink[y * W + x]) { has = true; break; }
             }
-            if (has) return Math.abs(x - fromX);
+            if (has) break;
+            blank += 1;
             x += step;
           }
-          return Math.abs(fromX - (step < 0 ? 0 : W - 1));
+          if (x < 0 || x >= W) return Infinity;
+          return blank;
         };
+
         const gapLeft = scanGap(col.start - 1, -1);
         const gapRight = scanGap(col.end, 1);
         // 左右各自最多扩到「相邻墨迹的一半」，两边加起来不会重叠
@@ -1032,6 +1038,7 @@ export const segmentCharacters = async (imageSrc, options = {}) => {
         );
         const boxLeft = Math.min(col.start, measured.left);
         const boxRight = Math.max(col.end, measured.right);
+
 
         // 本字到上下相邻字的实际空隙（用于限制垂直扩展）
         const prevBand = charBands[bandIndex - 1];

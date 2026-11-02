@@ -193,7 +193,8 @@ const PracticeView = ({
     const naturalHeight = naturalSize.height;
     if (!naturalWidth || !naturalHeight) return;
 
-    const padding = Math.max(2, Math.round(Math.min(box.width, box.height) * 0.06));
+    // 单字视图留白 12%：切分框可能与字形有轻微偏差，多留一点保证四边完整显示
+    const padding = Math.max(3, Math.round(Math.min(box.width, box.height) * 0.12));
     const x = Math.max(0, box.x - padding);
     const y = Math.max(0, box.y - padding);
 
