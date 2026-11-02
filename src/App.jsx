@@ -10,7 +10,7 @@ import { deleteSegmentationByPrefix, clearSegmentations } from './utils/segmentC
 import { FaImages, FaCog, FaPlus } from 'react-icons/fa';
 
 const DB_NAME = 'calligraphyImages';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 const STORE_NAME = 'images';
 const THEME_STORAGE_KEY = 'calligraphy:theme';
 const TOAST_DURATION = 2200;
@@ -47,6 +47,8 @@ const App = () => {
   const [mode, setMode] = useState('library');
   const [selectedCharacter, setSelectedCharacter] = useState(null);
   const [showSegment, setShowSegment] = useState(false);
+  // 切分结果变更的版本号：切分面板改动后，临摹页据此重新读取已存网格
+  const [gridVersion, setGridVersion] = useState(0);
   const [deleteIndex, setDeleteIndex] = useState(null);
   const [toast, setToast] = useState('');
   const [theme, setTheme] = useState(() => {
@@ -121,6 +123,10 @@ const App = () => {
       // 切分结果缓存（按图片哈希存储，避免每次重新计算）
       if (!database.objectStoreNames.contains('segmentations')) {
         database.createObjectStore('segmentations', { keyPath: 'id' });
+      }
+      // 每张字帖的用户设置（版面模式 / 是否带格子线）
+      if (!database.objectStoreNames.contains('segmentationSettings')) {
+        database.createObjectStore('segmentationSettings', { keyPath: 'id' });
       }
     };
 
@@ -357,6 +363,8 @@ const App = () => {
           onOpenSegment={() => setShowSegment(true)}
           recentImages={recentImages}
           onSwitchImage={handleSwitchImage}
+          db={db}
+          gridVersion={gridVersion}
         />
       ) : (
         <>
@@ -421,7 +429,10 @@ const App = () => {
             setSelectedCharacter(character);
             setShowSegment(false);
           }}
-          onClose={() => setShowSegment(false)}
+          onClose={() => {
+            setShowSegment(false);
+            setGridVersion((value) => value + 1);
+          }}
         />
       )}
 

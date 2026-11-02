@@ -12,7 +12,13 @@ import {
 } from 'react-icons/fa';
 import { segmentCharacters } from '../utils/segment';
 import { hashImageData } from '../utils/imageHash';
-import { readSegmentation, writeSegmentation } from '../utils/segmentCache';
+import {
+  readSegmentation,
+  writeSegmentation,
+  deleteSegmentation,
+  readSettings,
+  writeSettings
+} from '../utils/segmentCache';
 import { removeBox, mergeBoxes, splitBox, findNearestBoxIndex } from '../utils/boxEdit';
 
 const LAYOUT_OPTIONS = [
@@ -29,6 +35,8 @@ const SegmentSheet = ({ image, db, onSelectCharacter, onClose }) => {
   const [result, setResult] = useState(null);
   const [layout, setLayout] = useState('auto');
   const [hasGrid, setHasGrid] = useState(false);
+  // 设置是否已从存储恢复（未恢复前不触发切分）
+  const [settingsLoaded, setSettingsLoaded] = useState(false);
   const [imageSize, setImageSize] = useState({ width: 0, height: 0 });
   const [attempt, setAttempt] = useState(0);
   // 编辑模式：选中的框索引（null 表示未选中）
@@ -37,8 +45,36 @@ const SegmentSheet = ({ image, db, onSelectCharacter, onClose }) => {
   // 用户手动修改过的框（非 null 时优先于自动结果，且不写回缓存）
   const [editedBoxes, setEditedBoxes] = useState(null);
 
+  // 先恢复这张字帖上次的版面设置与「是否带格子线」
   useEffect(() => {
-    if (!image) return undefined;
+    if (!image || !db) {
+      setSettingsLoaded(true);
+      return undefined;
+    }
+    let cancelled = false;
+    const load = async () => {
+      const settings = await readSettings(db, hashImageData(image));
+      if (cancelled) return;
+      if (settings) {
+        if (settings.layout) setLayout(settings.layout);
+        if (typeof settings.hasGrid === 'boolean') setHasGrid(settings.hasGrid);
+      }
+      setSettingsLoaded(true);
+    };
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, [image, db]);
+
+  // 记住用户的选择（换图 / 切换时生效，随切分一起持久化）
+  useEffect(() => {
+    if (!image || !db || !settingsLoaded) return;
+    writeSettings(db, hashImageData(image), { layout, hasGrid });
+  }, [image, db, layout, hasGrid, settingsLoaded]);
+
+  useEffect(() => {
+    if (!image || !settingsLoaded) return undefined;
 
     let cancelled = false;
 
@@ -60,6 +96,22 @@ const SegmentSheet = ({ image, db, onSelectCharacter, onClose }) => {
 
         // 命中缓存直接复用（点「重新切分」时强制重算）
         if (attempt === 0) {
+          // 优先用户的手动结果
+          const manual = await readSegmentation(db, `${cacheKey}:manual`);
+          if (cancelled) return;
+          if (manual && manual.boxes && manual.boxes.length > 0 && manual.imageWidth === naturalWidth) {
+            const autoCached = await readSegmentation(db, cacheKey);
+            setResult({
+              boxes: autoCached && autoCached.boxes ? autoCached.boxes : manual.boxes,
+              layout: manual.layout || 'vertical',
+              strategy: (autoCached && autoCached.strategy) || 'manual'
+            });
+            setEditedBoxes(manual.boxes);
+            setSelectedIndex(null);
+            setStatus('done');
+            return;
+          }
+
           const cached = await readSegmentation(db, cacheKey);
           if (cancelled) return;
           if (cached && cached.boxes && cached.boxes.length > 0 && cached.imageWidth === naturalWidth) {
@@ -99,7 +151,7 @@ const SegmentSheet = ({ image, db, onSelectCharacter, onClose }) => {
     return () => {
       cancelled = true;
     };
-  }, [image, layout, hasGrid, attempt, db]);
+  }, [image, layout, hasGrid, attempt, db, settingsLoaded]);
 
   useEffect(() => {
     const onKeyDown = (event) => {
@@ -142,9 +194,25 @@ const SegmentSheet = ({ image, db, onSelectCharacter, onClose }) => {
   const boxes = editedBoxes || autoBoxes;
 
   // 任意编辑后切到「用户结果」，后续操作都基于它
+  // 两个键：自动结果与用户结果分开存，互不覆盖
+  const baseKey = image
+    ? `${hashImageData(image)}:${layout}:${hasGrid ? 'grid' : 'free'}`
+    : '';
+  const manualKey = baseKey ? `${baseKey}:manual` : '';
+
+  // 编辑结果立即持久化：下次打开直接复用
   const applyBoxes = (next) => {
     setEditedBoxes(next);
     setSelectedIndex(null);
+    if (!db || !manualKey) return;
+    writeSegmentation(db, manualKey, {
+      boxes: next,
+      layout: result && result.layout ? result.layout : 'vertical',
+      strategy: 'manual',
+      edited: true,
+      imageWidth: imageSize.width,
+      imageHeight: imageSize.height
+    });
   };
 
   const handleDelete = () => {
@@ -167,6 +235,9 @@ const SegmentSheet = ({ image, db, onSelectCharacter, onClose }) => {
   const handleResetEdit = () => {
     setEditedBoxes(null);
     setSelectedIndex(null);
+    if (!db || !manualKey) return;
+    // 删掉手动结果，自动结果原样保留
+    deleteSegmentation(db, manualKey);
   };
 
   return (
@@ -179,8 +250,14 @@ const SegmentSheet = ({ image, db, onSelectCharacter, onClose }) => {
             自动切字
             {status === 'done' && (
               <span className="section-head__hint" style={{ marginLeft: 8 }}>
-                {result.strategy === 'grid-lines' ? '按格线' : result.layout === 'vertical' ? '竖排' : '横排'} ·{' '}
-                {boxes.length} 字
+                {editedBoxes
+                  ? '已手动调整'
+                  : result.strategy === 'grid-lines'
+                  ? '按格线'
+                  : result.layout === 'vertical'
+                  ? '竖排'
+                  : '横排'}{' '}
+                · {boxes.length} 字
               </span>
             )}
           </h3>

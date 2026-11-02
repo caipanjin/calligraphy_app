@@ -596,6 +596,29 @@ button {
   }
 }
 
+/* 舞台上的切分网格 */
+.stage-grid {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+}
+
+.stage-grid__box {
+  position: absolute;
+  border: 1.5px solid color-mix(in srgb, var(--accent) 75%, transparent);
+  border-radius: 3px;
+  background: transparent;
+  transition: background 0.12s, border-color 0.12s;
+  cursor: pointer;
+}
+
+.stage-grid__box:hover,
+.stage-grid__box:focus-visible {
+  background: color-mix(in srgb, var(--accent) 30%, transparent);
+  border-color: var(--accent);
+  outline: none;
+}
+
 /* 单字视图 */
 .char-view {
   position: relative;

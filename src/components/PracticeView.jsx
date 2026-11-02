@@ -18,6 +18,8 @@ import {
   getPreviousCharacterPosition,
   isHiddenPosition
 } from '../utils/charNav';
+import { readSegmentation } from '../utils/segmentCache';
+import { hashImageData } from '../utils/imageHash';
 
 // 缩放因子
 const ZOOM_FACTOR = 1.05;
@@ -55,7 +57,18 @@ const touchDistance = (touches) => {
 /**
  * 临摹页：图片模式（点选单字）与单字模式（拖动 / 双指缩放 / 导航）
  */
-const PracticeView = ({ image, title, selectedCharacter, setSelectedCharacter, onBack, onOpenSegment, recentImages = [], onSwitchImage }) => {
+const PracticeView = ({
+  image,
+  title,
+  selectedCharacter,
+  setSelectedCharacter,
+  onBack,
+  onOpenSegment,
+  recentImages = [],
+  onSwitchImage,
+  db,
+  gridVersion = 0
+}) => {
   const frameRef = useRef(null);
   const canvasRef = useRef(null);
   const gestureRef = useRef({ mode: 'none', x: 0, y: 0 });
@@ -63,6 +76,9 @@ const PracticeView = ({ image, title, selectedCharacter, setSelectedCharacter, o
 
   const [dragging, setDragging] = useState(false);
   const [showDpad, setShowDpad] = useState(false);
+  // 已保存的切分网格（打开字帖即加载，直接叠在图上点选）
+  const [savedBoxes, setSavedBoxes] = useState(null);
+  const [savedLayout, setSavedLayout] = useState('vertical');
 
   const isCharMode = Boolean(selectedCharacter);
 
@@ -71,7 +87,75 @@ const PracticeView = ({ image, title, selectedCharacter, setSelectedCharacter, o
     setShowDpad(false);
   }, [setSelectedCharacter]);
 
+  /* ---------------- 载入已保存的切分 ---------------- */
+
+  useEffect(() => {
+    if (!image || !db) return undefined;
+    let cancelled = false;
+
+    const load = async () => {
+      const prefix = `${hashImageData(image)}:`;
+      // 版面模式 + 是否有格 共 6 种组合，优先取手动结果
+      const layouts = ['auto', 'vertical', 'horizontal'];
+      const variants = ['free', 'grid'];
+
+      let found = null;
+      for (const layoutMode of layouts) {
+        for (const variant of variants) {
+          const key = `${prefix}${layoutMode}:${variant}`;
+          const manual = await readSegmentation(db, `${key}:manual`);
+          if (cancelled) return;
+          if (manual && manual.boxes && manual.boxes.length > 0) {
+            found = { boxes: manual.boxes, layout: manual.layout || 'vertical' };
+            break;
+          }
+          const auto = await readSegmentation(db, key);
+          if (cancelled) return;
+          if (!found && auto && auto.boxes && auto.boxes.length > 0) {
+            found = { boxes: auto.boxes, layout: auto.layout || 'vertical' };
+          }
+        }
+        if (found && found.layout) break;
+      }
+      if (!cancelled) {
+        setSavedBoxes(found ? found.boxes : null);
+        setSavedLayout(found && found.layout ? found.layout : 'vertical');
+      }
+    };
+
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, [image, db, gridVersion]);
+
   /* ---------------- 图片模式：点选单字 ---------------- */
+
+  // 点击已切好的框直接进入临摹
+  const handleSavedBoxClick = (box, index) => {
+    const frame = frameRef.current;
+    const img = frame ? frame.querySelector('img') : null;
+    const naturalWidth = img ? img.naturalWidth || img.width : 0;
+    const naturalHeight = img ? img.naturalHeight || img.height : 0;
+    if (!naturalWidth || !naturalHeight) return;
+
+    const padding = Math.max(2, Math.round(Math.min(box.width, box.height) * 0.06));
+    const x = Math.max(0, box.x - padding);
+    const y = Math.max(0, box.y - padding);
+
+    setSelectedCharacter({
+      src: image,
+      width: naturalWidth,
+      height: naturalHeight,
+      viewBox: {
+        x,
+        y,
+        width: Math.min(naturalWidth - x, box.width + padding * 2),
+        height: Math.min(naturalHeight - y, box.height + padding * 2)
+      },
+      grid: { boxes: savedBoxes, index }
+    });
+  };
 
   const handleStageClick = (event) => {
     const frame = frameRef.current;
@@ -424,10 +508,38 @@ const PracticeView = ({ image, title, selectedCharacter, setSelectedCharacter, o
               imageAlt="字帖"
               style={{ width: '100%', height: 'auto' }}
             />
-            <div className="stage-hotspot" onClick={handleStageClick} role="button" tabIndex={0} aria-label="点选单字" />
+            {savedBoxes && savedBoxes.length > 0 ? (
+              <div className="stage-grid">
+                {savedBoxes.map((box, index) => {
+                  const frame = frameRef.current;
+                  const img = frame ? frame.querySelector('img') : null;
+                  const nw = img ? img.naturalWidth || img.width : 0;
+                  const nh = img ? img.naturalHeight || img.height : 0;
+                  if (!nw || !nh) return null;
+                  return (
+                    <button
+                      key={`${index}-${Math.round(box.x)}-${Math.round(box.y)}`}
+                      className="stage-grid__box"
+                      style={{
+                        left: `${(box.x / nw) * 100}%`,
+                        top: `${(box.y / nh) * 100}%`,
+                        width: `${(box.width / nw) * 100}%`,
+                        height: `${(box.height / nh) * 100}%`
+                      }}
+                      onClick={() => handleSavedBoxClick(box, index)}
+                      aria-label={`第 ${index + 1} 个字`}
+                    />
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="stage-hotspot" onClick={handleStageClick} role="button" tabIndex={0} aria-label="点选单字" />
+            )}
             <div className="stage-hint">
               <FaRegHandPointer size={11} />
-              轻触选择要临摹的字
+              {savedBoxes && savedBoxes.length > 0
+                ? `点字直接临摹（已切 ${savedBoxes.length} 字）`
+                : '轻触选择要临摹的字'}
             </div>
           </div>
 
