@@ -1031,6 +1031,43 @@ button {
   display: block;
 }
 
+/* 编辑模式 */
+.seg-box--editable {
+  cursor: pointer;
+}
+
+.seg-box--selected {
+  background: color-mix(in srgb, var(--accent) 45%, transparent);
+  border-width: 2.5px;
+  box-shadow: 0 0 0 2px var(--surface);
+  z-index: 2;
+}
+
+.seg-edit-hint {
+  margin: 0 0 10px;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft);
+  font-size: 12.5px;
+  color: var(--ink-2);
+  text-align: center;
+}
+
+.seg-edit-bar {
+  flex-wrap: wrap;
+}
+
+.seg-edit-bar .btn {
+  flex: 1;
+  min-width: 74px;
+  min-height: 42px;
+  font-size: 13.5px;
+}
+
+.seg-edit-bar .btn:disabled {
+  opacity: 0.4;
+}
+
 /* 每个单字的可点区域 */
 .seg-box {
   position: absolute;

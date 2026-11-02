@@ -1,8 +1,19 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { FaTimes, FaRedo, FaExclamationTriangle, FaHandPointer } from 'react-icons/fa';
+import {
+  FaTimes,
+  FaRedo,
+  FaExclamationTriangle,
+  FaHandPointer,
+  FaTrashAlt,
+  FaCompress,
+  FaCut,
+  FaPen,
+  FaCheck
+} from 'react-icons/fa';
 import { segmentCharacters } from '../utils/segment';
 import { hashImageData } from '../utils/imageHash';
 import { readSegmentation, writeSegmentation } from '../utils/segmentCache';
+import { removeBox, mergeBoxes, splitBox, findNearestBoxIndex } from '../utils/boxEdit';
 
 const LAYOUT_OPTIONS = [
   { value: 'auto', label: '自动' },
@@ -20,6 +31,11 @@ const SegmentSheet = ({ image, db, onSelectCharacter, onClose }) => {
   const [hasGrid, setHasGrid] = useState(false);
   const [imageSize, setImageSize] = useState({ width: 0, height: 0 });
   const [attempt, setAttempt] = useState(0);
+  // 编辑模式：选中的框索引（null 表示未选中）
+  const [editing, setEditing] = useState(false);
+  const [selectedIndex, setSelectedIndex] = useState(null);
+  // 用户手动修改过的框（非 null 时优先于自动结果，且不写回缓存）
+  const [editedBoxes, setEditedBoxes] = useState(null);
 
   useEffect(() => {
     if (!image) return undefined;
@@ -48,6 +64,8 @@ const SegmentSheet = ({ image, db, onSelectCharacter, onClose }) => {
           if (cancelled) return;
           if (cached && cached.boxes && cached.boxes.length > 0 && cached.imageWidth === naturalWidth) {
             setResult({ boxes: cached.boxes, layout: cached.layout, strategy: cached.strategy });
+            setEditedBoxes(null);
+            setSelectedIndex(null);
             setStatus('done');
             return;
           }
@@ -57,6 +75,8 @@ const SegmentSheet = ({ image, db, onSelectCharacter, onClose }) => {
         if (cancelled) return;
 
         setResult(segmentation);
+        setEditedBoxes(null);
+        setSelectedIndex(null);
         const empty = segmentation.failed || segmentation.boxes.length === 0;
         setStatus(empty ? 'empty' : 'done');
 
@@ -91,6 +111,14 @@ const SegmentSheet = ({ image, db, onSelectCharacter, onClose }) => {
 
   const handleRetry = useCallback(() => setAttempt((value) => value + 1), []);
 
+  const handleBoxClick = (box, index) => {
+    if (editing) {
+      setSelectedIndex((current) => (current === index ? null : index));
+      return;
+    }
+    handlePick(box, index);
+  };
+
   const handlePick = (box, index) => {
     const padding = Math.max(2, Math.round(Math.min(box.width, box.height) * 0.06));
     const x = Math.max(0, box.x - padding);
@@ -110,7 +138,36 @@ const SegmentSheet = ({ image, db, onSelectCharacter, onClose }) => {
     });
   };
 
-  const boxes = result && !result.failed ? result.boxes : [];
+  const autoBoxes = result && !result.failed ? result.boxes : [];
+  const boxes = editedBoxes || autoBoxes;
+
+  // 任意编辑后切到「用户结果」，后续操作都基于它
+  const applyBoxes = (next) => {
+    setEditedBoxes(next);
+    setSelectedIndex(null);
+  };
+
+  const handleDelete = () => {
+    if (selectedIndex === null) return;
+    applyBoxes(removeBox(boxes, selectedIndex));
+  };
+
+  const handleMerge = () => {
+    if (selectedIndex === null) return;
+    const neighbor = findNearestBoxIndex(boxes, selectedIndex);
+    if (neighbor < 0) return;
+    applyBoxes(mergeBoxes(boxes, selectedIndex, neighbor));
+  };
+
+  const handleSplit = () => {
+    if (selectedIndex === null) return;
+    applyBoxes(splitBox(boxes, selectedIndex, result.layout === 'vertical'));
+  };
+
+  const handleResetEdit = () => {
+    setEditedBoxes(null);
+    setSelectedIndex(null);
+  };
 
   return (
     <>
@@ -127,6 +184,19 @@ const SegmentSheet = ({ image, db, onSelectCharacter, onClose }) => {
               </span>
             )}
           </h3>
+          {status === 'done' && (
+            <button
+              className={`icon-btn${editing ? ' icon-btn--accent' : ''}`}
+              onClick={() => {
+                setEditing((value) => !value);
+                setSelectedIndex(null);
+              }}
+              aria-label={editing ? '完成编辑' : '编辑切分框'}
+              title={editing ? '完成编辑' : '编辑'}
+            >
+              {editing ? <FaCheck size={15} /> : <FaPen size={14} />}
+            </button>
+          )}
           <button className="icon-btn" onClick={onClose} aria-label="关闭">
             <FaTimes size={15} />
           </button>
@@ -171,39 +241,71 @@ const SegmentSheet = ({ image, db, onSelectCharacter, onClose }) => {
             </div>
           )}
 
+          {status === 'done' && editing && (
+            <div className="seg-edit-hint">
+              {selectedIndex === null
+                ? '点击任意框选中，再选择下方操作'
+                : `已选中第 ${selectedIndex + 1} 个框`}
+            </div>
+          )}
+
           {status === 'done' && (
             <div className="seg-preview">
               <img src={image} alt="切分结果" />
               {boxes.map((box, index) => (
                 <button
-                  key={index}
-                  className="seg-box"
+                  key={`${index}-${Math.round(box.x)}-${Math.round(box.y)}`}
+                  className={`seg-box${editing ? ' seg-box--editable' : ''}${
+                    selectedIndex === index ? ' seg-box--selected' : ''
+                  }`}
                   style={{
                     left: `${(box.x / imageSize.width) * 100}%`,
                     top: `${(box.y / imageSize.height) * 100}%`,
                     width: `${(box.width / imageSize.width) * 100}%`,
                     height: `${(box.height / imageSize.height) * 100}%`
                   }}
-                  onClick={() => handlePick(box, index)}
-                  aria-label={`选择第 ${index + 1} 个字`}
+                  onClick={() => handleBoxClick(box, index)}
+                  aria-label={`第 ${index + 1} 个字`}
                 />
               ))}
             </div>
           )}
         </div>
 
-        <div className="sheet__footer">
-          {status !== 'loading' && (
-            <button className="btn btn--ghost" onClick={handleRetry}>
-              <FaRedo size={13} />
-              重新切分
+        {status === 'done' && editing ? (
+          <div className="sheet__footer seg-edit-bar">
+            <button className="btn btn--ghost" onClick={handleDelete} disabled={selectedIndex === null}>
+              <FaTrashAlt size={13} />
+              删除
             </button>
-          )}
-          <button className="btn btn--primary btn--block" onClick={onClose}>
-            <FaHandPointer size={13} />
-            手动点选
-          </button>
-        </div>
+            <button className="btn btn--ghost" onClick={handleMerge} disabled={selectedIndex === null}>
+              <FaCompress size={13} />
+              合并
+            </button>
+            <button className="btn btn--ghost" onClick={handleSplit} disabled={selectedIndex === null}>
+              <FaCut size={13} />
+              拆分
+            </button>
+            {editedBoxes && (
+              <button className="btn btn--text" onClick={handleResetEdit}>
+                还原
+              </button>
+            )}
+          </div>
+        ) : (
+          <div className="sheet__footer">
+            {status !== 'loading' && (
+              <button className="btn btn--ghost" onClick={handleRetry}>
+                <FaRedo size={13} />
+                重新切分
+              </button>
+            )}
+            <button className="btn btn--primary btn--block" onClick={onClose}>
+              <FaHandPointer size={13} />
+              手动点选
+            </button>
+          </div>
+        )}
       </div>
     </>
   );

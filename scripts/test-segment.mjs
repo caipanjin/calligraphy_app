@@ -154,9 +154,15 @@ check('图片哈希：超长输入仍快速（抽样）', () => {
   assert.ok(ms < 500, `耗时 ${ms}ms`);
 });
 
-check('竖排：过高的块按列宽拆分', () => {
-  // 列宽 162，块高 234（比值 1.44）应拆成 2 块
+check('竖排：高宽比 1.44 的字不拆分（正常长竖笔）', () => {
+  // 实测正常字上限 1.44，阈值 1.7，不应拆分
   const out = splitTallGlyphs([{ start: 625, end: 859 }], 162);
+  assert.equal(out.length, 1, `实际拆成 ${out.length} 块`);
+});
+
+check('竖排：高宽比 2.1 的粘连块拆分', () => {
+  // 列宽 162，块高 340（比值 2.1）应拆成 2 块
+  const out = splitTallGlyphs([{ start: 0, end: 340 }], 162);
   assert.equal(out.length, 2);
 });
 

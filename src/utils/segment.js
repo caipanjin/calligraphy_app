@@ -547,15 +547,49 @@ const normalizeColumnCounts = (boxes, columnRanges, layout) => {
   });
   if (tie || mode <= 0) return boxes;
 
+  // 只裁掉「贴边且偏小」的多余块（被页面边缘截断的残块）。
+  // 注意：不能只按尺寸判断——同一页里笔画简单的字本来就可能偏小（实测 112 vs 233 都正常）。
+  const allSizes = [];
+  groups.forEach((group) => {
+    group.forEach((box) => {
+      allSizes.push(layout === 'vertical' ? box.height : box.width);
+    });
+  });
+  if (allSizes.length === 0) return boxes;
+  const sortedSizes = [...allSizes].sort((a, b) => a - b);
+  const typicalSize = sortedSizes[Math.floor(sortedSizes.length / 2)];
+  // 极小（< 中位 30%）几乎必然是残块；60% 以下则需同时贴边才算
+  const tinyLimit = typicalSize * 0.3;
+  const edgeLimit = typicalSize * 0.6;
+
   const kept = [];
   groups.forEach((group) => {
     if (group.length <= mode) {
       kept.push(...group);
       return;
     }
-    // 多出来的从末尾裁掉（竖排取 y 最大的，横排取 x 最大的）
+
     const sorted = [...group].sort((a, b) => (layout === 'vertical' ? a.y - b.y : a.x - b.x));
-    kept.push(...sorted.slice(0, mode));
+    const first = sorted[0];
+    const last = sorted[sorted.length - 1];
+    const sizeOf = (box) => (layout === 'vertical' ? box.height : box.width);
+    // 极小的一律视为残块（可能在中间）；稍小但贴边的也视为残块
+    const tiny = sorted.filter((box) => sizeOf(box) < tinyLimit);
+    const edgeCandidates = [first, last].filter(
+      (box) => sizeOf(box) < edgeLimit && !tiny.includes(box)
+    );
+    const candidates = [...tiny, ...edgeCandidates];
+
+    const excess = group.length - mode;
+    if (candidates.length > 0) {
+      const drop = new Set(candidates.slice(0, excess));
+      sorted.forEach((box) => {
+        if (!drop.has(box)) kept.push(box);
+      });
+    } else {
+      // 没有贴边残块的多字列：保留原样（例如一列本来就比别人多一个字）
+      kept.push(...sorted);
+    }
   });
 
   return kept.length > 0 ? kept : boxes;
@@ -568,7 +602,9 @@ const normalizeColumnCounts = (boxes, columnRanges, layout) => {
  * 若某块明显高于列宽（如 1.44 倍），说明上下两个字粘连，
  * 应按列宽等分拆开。
  */
-export const splitTallGlyphs = (bands, referenceSize, maxRatio = 1.25) => {
+// 正常汉字的高度可以略大于宽度（实测上限约 1.44），
+// 而两字粘连通常在 2.0 以上，因此阈值取 1.7
+export const splitTallGlyphs = (bands, referenceSize, maxRatio = 1.7) => {
   if (bands.length === 0 || referenceSize <= 0) return bands;
 
   const result = [];
@@ -842,7 +878,7 @@ export const segmentCharacters = async (imageSrc, options = {}) => {
         );
       });
     });
-    boxes = splitOversized(boxes, 'vertical');
+    // 竖排的高度拆分已由 splitTallGlyphs 按列宽完成，这里不再重复按中位值拆分
   } else {
     columnCount = rowBands.length;
     rowBands.forEach((row) => {
