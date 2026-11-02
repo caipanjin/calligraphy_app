@@ -17,6 +17,10 @@ build/
 .idea/
 .vscode/
 
+# Android 签名（密钥与密码不入库）
+*.jks
+*.keystore
+keystore.properties
 # 忽略本地 agent 工具状态
 .pilotdeck/
 

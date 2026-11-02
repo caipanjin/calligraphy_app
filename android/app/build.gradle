@@ -14,17 +14,26 @@ android {
              ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    // 签名信息从本地 keystore.properties 读取（该文件已加入 .gitignore，不入库）
+    def keystorePropertiesFile = rootProject.file('../keystore.properties')
+    def keystoreProperties = new Properties()
+    if (keystorePropertiesFile.exists()) {
+        keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+    }
+
     signingConfigs {
         release {
-            storeFile file('./my-release-key.jks')
-            storePassword '***REMOVED***'
-            keyAlias 'my-key-alias'
-            keyPassword '***REMOVED***'
+            if (keystorePropertiesFile.exists()) {
+                storeFile file(keystoreProperties['storeFile'] ?: './my-release-key.jks')
+                storePassword keystoreProperties['storePassword']
+                keyAlias keystoreProperties['keyAlias']
+                keyPassword keystoreProperties['keyPassword']
+            }
         }
     }
     buildTypes {
         release {
-            signingConfig signingConfigs.release
+            signingConfig keystorePropertiesFile.exists() ? signingConfigs.release : null
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
