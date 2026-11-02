@@ -285,10 +285,20 @@ export const measureGlyphHorizontally = (
   y1,
   colStart,
   colEnd,
-  maxOverflow = 0.6
+  maxOverflow = 0.6,
+  neighborGap = Infinity
 ) => {
   const columnWidth = colEnd - colStart;
-  const limit = Math.max(2, Math.round(columnWidth * maxOverflow));
+  // 扩展上限：先受列宽比例限制，再受「到相邻墨迹的空隙」限制
+  // 左右分别限额：各自不超过「该方向到最近墨迹的距离」的 45%，
+  // 且不超过列宽的 30%（字距密集的字帖上这是唯一安全的做法）
+  const byRatio = Math.max(2, Math.round(columnWidth * maxOverflow));
+  // 有相邻墨迹时以空隙为准（各留 45%），否则按列宽比例
+  const byGap = Number.isFinite(neighborGap)
+    ? Math.max(2, Math.round(neighborGap * 0.45))
+    : byRatio;
+  const limitLeft = Math.max(2, Math.min(byRatio, byGap));
+  const limitRight = limitLeft;
 
   const hasInkAt = (x) => {
     for (let y = y0; y < y1; y += 1) {
@@ -303,7 +313,7 @@ export const measureGlyphHorizontally = (
   let left = colStart;
   let extendLeft = 0;
   let gap = 0;
-  for (let x = colStart - 1; x >= Math.max(0, colStart - limit); x -= 1) {
+  for (let x = colStart - 1; x >= Math.max(0, colStart - limitLeft); x -= 1) {
     if (hasInkAt(x)) {
       left = x;
       extendLeft = colStart - x;
@@ -316,7 +326,7 @@ export const measureGlyphHorizontally = (
   let right = colEnd;
   let extendRight = 0;
   gap = 0;
-  for (let x = colEnd; x < Math.min(width, colEnd + limit); x += 1) {
+  for (let x = colEnd; x < Math.min(width, colEnd + limitRight); x += 1) {
     if (hasInkAt(x)) {
       right = x + 1;
       extendRight = x + 1 - colEnd;
@@ -344,10 +354,21 @@ export const measureGlyphVertically = (
   x1,
   y0,
   y1,
-  maxOverflow = 0.6
+  maxOverflow = 0.6,
+  gapUp = Infinity,
+  gapDown = Infinity
 ) => {
   const bandHeight = y1 - y0;
-  const limit = Math.max(2, Math.round(bandHeight * maxOverflow));
+  const byRatio = bandHeight * maxOverflow;
+  // 上下各自限额：上方受 gapUp 约束，下方受 gapDown 约束
+  const limitUp = Math.max(
+    2,
+    Math.round(Math.min(byRatio, Number.isFinite(gapUp) ? gapUp * 0.45 : Infinity))
+  );
+  const limitDown = Math.max(
+    2,
+    Math.round(Math.min(byRatio, Number.isFinite(gapDown) ? gapDown * 0.45 : Infinity))
+  );
 
   const hasInkAt = (y) => {
     const base = y * width;
@@ -362,7 +383,7 @@ export const measureGlyphVertically = (
   let top = y0;
   let extendUp = 0;
   let gap = 0;
-  for (let y = y0 - 1; y >= Math.max(0, y0 - limit); y -= 1) {
+  for (let y = y0 - 1; y >= Math.max(0, y0 - limitUp); y -= 1) {
     if (hasInkAt(y)) {
       top = y;
       extendUp = y0 - y;
@@ -375,7 +396,7 @@ export const measureGlyphVertically = (
   let bottom = y1;
   let extendDown = 0;
   gap = 0;
-  for (let y = y1; y < Math.min(height, y1 + limit); y += 1) {
+  for (let y = y1; y < Math.min(height, y1 + limitDown); y += 1) {
     if (hasInkAt(y)) {
       bottom = y + 1;
       extendDown = y + 1 - y1;
@@ -979,11 +1000,44 @@ export const segmentCharacters = async (imageSrc, options = {}) => {
         columnWidth
       );
       columnDetail.push({ width: col.end - col.start, bands: charBands.length, sizes: charBands.map((b) => b.end - b.start) });
-      charBands.forEach((band) => {
+      charBands.forEach((band, bandIndex) => {
+        // 本字在「自己这一行范围内」到左右相邻墨迹的实际空隙
+        const scanGap = (fromX, step) => {
+          let x = fromX;
+          while (x >= 0 && x < W) {
+            let has = false;
+            for (let y = band.start; y < band.end; y += 1) {
+              if (ink[y * W + x]) { has = true; break; }
+            }
+            if (has) return Math.abs(x - fromX);
+            x += step;
+          }
+          return Math.abs(fromX - (step < 0 ? 0 : W - 1));
+        };
+        const gapLeft = scanGap(col.start - 1, -1);
+        const gapRight = scanGap(col.end, 1);
+        // 左右各自最多扩到「相邻墨迹的一半」，两边加起来不会重叠
+        const horizontalGap = Math.min(gapLeft, gapRight);
+
         // 1) 先按字自身墨迹取宽，避免略宽的字被列边界裁掉
-        const measured = measureGlyphHorizontally(ink, W, band.start, band.end, col.start, col.end);
+        const measured = measureGlyphHorizontally(
+          ink,
+          W,
+          band.start,
+          band.end,
+          col.start,
+          col.end,
+          0.6,
+          horizontalGap
+        );
         const boxLeft = Math.min(col.start, measured.left);
         const boxRight = Math.max(col.end, measured.right);
+
+        // 本字到上下相邻字的实际空隙（用于限制垂直扩展）
+        const prevBand = charBands[bandIndex - 1];
+        const nextBand = charBands[bandIndex + 1];
+        const gapUp = prevBand ? band.start - prevBand.end : Infinity;
+        const gapDown = nextBand ? nextBand.start - band.end : Infinity;
 
         // 2) 再在这个宽度内取真实上下边界，避免笔画探出被裁
         const vertical = measureGlyphVertically(
@@ -993,7 +1047,10 @@ export const segmentCharacters = async (imageSrc, options = {}) => {
           boxLeft,
           boxRight,
           band.start,
-          band.end
+          band.end,
+          0.6,
+          gapUp,
+          gapDown
         );
         const boxTop = Math.min(band.start, vertical.top);
         const boxBottom = Math.max(band.end, vertical.bottom);
