@@ -121,7 +121,8 @@ const PracticeView = ({
       // 先读这张字帖的设置：它决定了该用哪份缓存
       const settings = await readSettings(db, hashImageData(image));
       if (cancelled) return;
-      const desiredLayout = settings && settings.layout ? settings.layout : 'auto';
+      // 字帖固定竖排，默认键与切分面板保持一致，避免同一张图存两份缓存
+      const desiredLayout = settings && settings.layout ? settings.layout : 'vertical';
       const desiredGrid = Boolean(settings && settings.hasGrid);
 
       // 按「设置对应的键」优先查找：手动结果 > 自动结果
