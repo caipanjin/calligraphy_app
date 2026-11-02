@@ -977,6 +977,36 @@ button {
 
 /* ---------------- 自动切字 ---------------- */
 
+.seg-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+  font-size: 13.5px;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.seg-toggle input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.seg-toggle em {
+  font-style: normal;
+  font-size: 11.5px;
+  color: var(--ink-3);
+  margin-left: auto;
+}
+
+
 .seg-hint {
   display: flex;
   align-items: center;

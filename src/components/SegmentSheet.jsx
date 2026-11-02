@@ -17,6 +17,7 @@ const SegmentSheet = ({ image, db, onSelectCharacter, onClose }) => {
   const [status, setStatus] = useState('loading');
   const [result, setResult] = useState(null);
   const [layout, setLayout] = useState('auto');
+  const [hasGrid, setHasGrid] = useState(false);
   const [imageSize, setImageSize] = useState({ width: 0, height: 0 });
   const [attempt, setAttempt] = useState(0);
 
@@ -39,7 +40,7 @@ const SegmentSheet = ({ image, db, onSelectCharacter, onClose }) => {
         const naturalHeight = img.naturalHeight || img.height;
         setImageSize({ width: naturalWidth, height: naturalHeight });
 
-        const cacheKey = `${hashImageData(image)}:${layout}`;
+        const cacheKey = `${hashImageData(image)}:${layout}:${hasGrid ? 'grid' : 'free'}`;
 
         // 命中缓存直接复用（点「重新切分」时强制重算）
         if (attempt === 0) {
@@ -52,7 +53,7 @@ const SegmentSheet = ({ image, db, onSelectCharacter, onClose }) => {
           }
         }
 
-        const segmentation = await segmentCharacters(image, { layout });
+        const segmentation = await segmentCharacters(image, { layout, hasGrid });
         if (cancelled) return;
 
         setResult(segmentation);
@@ -78,7 +79,7 @@ const SegmentSheet = ({ image, db, onSelectCharacter, onClose }) => {
     return () => {
       cancelled = true;
     };
-  }, [image, layout, attempt, db]);
+  }, [image, layout, hasGrid, attempt, db]);
 
   useEffect(() => {
     const onKeyDown = (event) => {
@@ -121,7 +122,8 @@ const SegmentSheet = ({ image, db, onSelectCharacter, onClose }) => {
             自动切字
             {status === 'done' && (
               <span className="section-head__hint" style={{ marginLeft: 8 }}>
-                {result.layout === 'vertical' ? '竖排' : '横排'} · {boxes.length} 字
+                {result.strategy === 'grid-lines' ? '按格线' : result.layout === 'vertical' ? '竖排' : '横排'} ·{' '}
+                {boxes.length} 字
               </span>
             )}
           </h3>
@@ -142,6 +144,16 @@ const SegmentSheet = ({ image, db, onSelectCharacter, onClose }) => {
               </button>
             ))}
           </div>
+
+          <label className="seg-toggle">
+            <input
+              type="checkbox"
+              checked={hasGrid}
+              onChange={(event) => setHasGrid(event.target.checked)}
+            />
+            <span>这张字帖带格子线</span>
+            <em>开启后按格线切分，更准</em>
+          </label>
 
           {status === 'loading' && <div className="seg-hint">正在分析版面…</div>}
 

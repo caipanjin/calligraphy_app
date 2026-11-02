@@ -103,7 +103,34 @@ export const buildInkMask = (img, maxSize = MAX_ANALYSIS_SIZE) => {
     for (let p = 0; p < ink.length; p += 1) ink[p] ^= 1;
   }
 
-  return { width, height, ink, threshold, scale: width / naturalWidth };
+  // 格线掩码：比「局部背景」略暗、但不是墨迹的细结构
+  // （格线通常是浅褐/浅灰细线，Otsu 会把它归入背景，需单独提取）
+  const faint = new Uint8Array(width * height);
+  const window = 7;
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const p = y * width + x;
+      if (ink[p]) continue;
+      // 局部背景：窗口内灰度中位数
+      const values = [];
+      for (let dy = -window; dy <= window; dy += 3) {
+        const yy = y + dy;
+        if (yy < 0 || yy >= height) continue;
+        for (let dx = -window; dx <= window; dx += 3) {
+          const xx = x + dx;
+          if (xx < 0 || xx >= width) continue;
+          values.push(gray[yy * width + xx]);
+        }
+      }
+      if (values.length === 0) continue;
+      values.sort((a, b) => a - b);
+      const background = values[Math.floor(values.length / 2)];
+      const delta = background - gray[p];
+      if (delta > 6 && gray[p] > threshold) faint[p] = 1;
+    }
+  }
+
+  return { width, height, ink, faint, threshold, scale: width / naturalWidth };
 };
 
 /** 垂直投影：每一列有多少墨迹像素 */
@@ -608,13 +635,135 @@ export const absorbFragments = (bands, referenceSize, tolerance = 0.7) => {
 };
 
 /**
+ * 检测格线（列格 / 行格 / 全格）
+ *
+ * 思路：格线是「比局部背景略暗的细线」，先得到 faint 掩码，
+ * 再做投影找强峰，最后从峰里提取最长等差序列（格距应高度一致）。
+ */
+export const detectGridLines = (faint, ink, width, height) => {
+  const colRatio = new Uint32Array(width);
+  const rowRatio = new Uint32Array(height);
+
+  for (let y = 0; y < height; y += 1) {
+    const rowStart = y * width;
+    let rowCount = 0;
+    for (let x = 0; x < width; x += 1) {
+      if (faint[rowStart + x]) {
+        colRatio[x] += 1;
+        rowCount += 1;
+      }
+    }
+    rowRatio[y] = rowCount;
+  }
+
+  const pickPeaks = (counts, total) => {
+    const ratios = new Float32Array(counts.length);
+    let max = 0;
+    for (let i = 0; i < counts.length; i += 1) {
+      ratios[i] = counts[i] / total;
+      if (ratios[i] > max) max = ratios[i];
+    }
+    if (max <= 0) return [];
+    const threshold = Math.max(max * 0.25, 0.12);
+    const peaks = [];
+    let index = 0;
+    while (index < ratios.length) {
+      if (ratios[index] < threshold) {
+        index += 1;
+        continue;
+      }
+      let end = index;
+      let best = index;
+      while (end < ratios.length && ratios[end] >= threshold) {
+        if (ratios[end] > ratios[best]) best = end;
+        end += 1;
+      }
+      peaks.push(best);
+      index = end + 10;
+    }
+    return peaks;
+  };
+
+  // 从候选线中找最长等差序列
+  const longestArithmetic = (peaks, minStep) => {
+    if (peaks.length < 3) return null;
+    let best = null;
+    for (let i = 0; i < peaks.length; i += 1) {
+      for (let j = i + 1; j < peaks.length; j += 1) {
+        const step = peaks[j] - peaks[i];
+        if (step < minStep) continue;
+        const sequence = [peaks[i], peaks[j]];
+        const tolerance = Math.max(4, step * 0.06);
+        let expected = peaks[j] + step;
+        for (let k = j + 1; k < peaks.length; k += 1) {
+          if (Math.abs(peaks[k] - expected) <= tolerance) {
+            sequence.push(peaks[k]);
+            expected = peaks[k] + step;
+          }
+        }
+        if (!best || sequence.length > best.sequence.length) {
+          best = { sequence, step };
+        }
+      }
+    }
+    return best && best.sequence.length >= 3 ? best : null;
+  };
+
+  const vertical = longestArithmetic(pickPeaks(colRatio, height), Math.round(width * 0.06));
+  const horizontal = longestArithmetic(pickPeaks(rowRatio, width), Math.round(height * 0.06));
+
+  const hasVertical = Boolean(vertical);
+  const hasHorizontal = Boolean(horizontal);
+  const kind = hasVertical && hasHorizontal ? 'full' : hasVertical ? 'column' : hasHorizontal ? 'row' : 'none';
+
+  return {
+    kind,
+    vertical: vertical ? vertical.sequence : [],
+    horizontal: horizontal ? horizontal.sequence : [],
+    verticalStep: vertical ? vertical.step : 0,
+    horizontalStep: horizontal ? horizontal.step : 0
+  };
+};
+
+/**
+ * 由格线生成单元格字框
+ * 竖排阅读顺序：从右往左、自上而下
+ */
+export const boxesFromGridLines = (grid, layout = 'vertical') => {
+  const { vertical, horizontal } = grid;
+  if (vertical.length < 2 || horizontal.length < 2) return [];
+
+  const boxes = [];
+  for (let r = 0; r < horizontal.length - 1; r += 1) {
+    for (let c = 0; c < vertical.length - 1; c += 1) {
+      boxes.push({
+        x: vertical[c],
+        y: horizontal[r],
+        width: vertical[c + 1] - vertical[c],
+        height: horizontal[r + 1] - horizontal[r]
+      });
+    }
+  }
+
+  // 用行高的一半作为分组步长，避免不同行被误判为同一行
+  const rowStep = Math.max(1, (horizontal[horizontal.length - 1] - horizontal[0]) / (horizontal.length - 1));
+  boxes.sort((a, b) => {
+    const rowDiff = Math.round((a.y - b.y) / (rowStep * 0.5));
+    if (rowDiff !== 0) return rowDiff;
+    return layout === 'vertical' ? b.x - a.x : a.x - b.x;
+  });
+
+  return boxes;
+};
+
+/**
  * 主入口：把整幅字帖切成一个个单字
  * @returns {Promise<{boxes: Array, layout: string, columns: number, scale: number, failed: boolean, reason?: string}>}
  */
 export const segmentCharacters = async (imageSrc, options = {}) => {
-  const { maxSize = MAX_ANALYSIS_SIZE, layout: forcedLayout = 'auto' } = options;
+  const { maxSize = MAX_ANALYSIS_SIZE, layout: forcedLayout = 'auto', hasGrid = false } = options;
   const img = await loadImageElement(imageSrc);
-  const { width: W, height: H, ink, scale } = buildInkMask(img, maxSize);
+  const { width: W, height: H, ink, faint, scale } = buildInkMask(img, maxSize);
 
   const gapCol = Math.max(2, Math.round(W * GAP_RATIO));
   const gapRow = Math.max(2, Math.round(H * GAP_RATIO));
@@ -722,6 +871,30 @@ export const segmentCharacters = async (imageSrc, options = {}) => {
       });
     });
     boxes = splitOversized(boxes, 'horizontal');
+  }
+
+  // 有格字帖：格线本身就是最可靠的分隔，直接用它生成单元格
+  let gridInfo = null;
+  if (hasGrid) {
+    gridInfo = detectGridLines(faint, ink, W, H);
+    const gridLayout = layout;
+    const gridBoxes = boxesFromGridLines(gridInfo, gridLayout).map(toSource);
+    if (gridBoxes.length > 0) {
+      return {
+        boxes: gridBoxes,
+        layout: gridLayout,
+        columns: Math.max(0, gridInfo.vertical.length - 1),
+        strategy: 'grid-lines',
+        gridKind: gridInfo.kind,
+        gridStep: { x: gridInfo.verticalStep / scale, y: gridInfo.horizontalStep / scale },
+        scale,
+        failed: false,
+        charSize: {
+          width: median(gridBoxes.map((box) => box.width)),
+          height: median(gridBoxes.map((box) => box.height))
+        }
+      };
+    }
   }
 
   // 过滤异常块（过大 = 整页被当成一个字；过小 = 噪点）

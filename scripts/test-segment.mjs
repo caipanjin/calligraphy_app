@@ -3,7 +3,16 @@
  * 运行：npm test
  */
 import assert from 'node:assert/strict';
-import { findBands, otsuThreshold, estimatePitch, buildGridBoxes, splitTallGlyphs, mergeSplitGlyphs } from '../src/utils/segment.js';
+import {
+  findBands,
+  otsuThreshold,
+  estimatePitch,
+  buildGridBoxes,
+  splitTallGlyphs,
+  mergeSplitGlyphs,
+  detectGridLines,
+  boxesFromGridLines
+} from '../src/utils/segment.js';
 import { hashImageData } from '../src/utils/imageHash.js';
 
 let passed = 0;
@@ -174,6 +183,47 @@ check('竖排：两个正常字之间不合并', () => {
     160
   );
   assert.equal(out.length, 2);
+});
+
+check('格线检测：识别出全格（列+行）', () => {
+  const W = 400;
+  const H = 500;
+  const faint = new Uint8Array(W * H);
+  const ink = new Uint8Array(W * H);
+  const vLines = [100, 200, 300];
+  const hLines = [120, 240, 360];
+  vLines.forEach((x) => {
+    for (let y = 0; y < H; y += 1) faint[y * W + x] = 1;
+  });
+  hLines.forEach((y) => {
+    for (let x = 0; x < W; x += 1) faint[y * W + x] = 1;
+  });
+  const grid = detectGridLines(faint, ink, W, H);
+  assert.equal(grid.kind, 'full');
+  assert.equal(grid.vertical.length, 3);
+  assert.equal(grid.horizontal.length, 3);
+});
+
+check('格线检测：无线条时返回 none', () => {
+  const faint = new Uint8Array(200 * 200);
+  const ink = new Uint8Array(200 * 200);
+  const grid = detectGridLines(faint, ink, 200, 200);
+  assert.equal(grid.kind, 'none');
+});
+
+check('由格线生成单元格：竖排从右往左', () => {
+  const grid = { vertical: [100, 200, 300], horizontal: [100, 200, 300] };
+  const boxes = boxesFromGridLines(grid, 'vertical');
+  assert.equal(boxes.length, 4);
+  // 首格应在右侧（x 最大）
+  assert.ok(boxes[0].x > boxes[1].x, `首格 x=${boxes[0].x}, 第二格 x=${boxes[1].x}`);
+});
+
+check('由格线生成单元格：横排从左往右', () => {
+  const grid = { vertical: [100, 200, 300], horizontal: [100, 200, 300] };
+  const boxes = boxesFromGridLines(grid, 'horizontal');
+  assert.equal(boxes.length, 4);
+  assert.ok(boxes[0].x < boxes[1].x, `首格 x=${boxes[0].x}, 第二格 x=${boxes[1].x}`);
 });
 
 console.log(`\n${passed} 项通过`);
