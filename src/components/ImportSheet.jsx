@@ -37,6 +37,8 @@ const ImportSheet = ({ onImport, onClose, initialUrl = '' }) => {
   const [errorMessage, setErrorMessage] = useState('');
   const [importing, setImporting] = useState(false);
   const [progress, setProgress] = useState('');
+  // 过滤统计：原始张数 / 保留张数 / 跳过张数
+  const [filteredInfo, setFilteredInfo] = useState(null);
   const [title, setTitle] = useState('');
   const cancelledRef = useRef(false);
 
@@ -146,8 +148,29 @@ const ImportSheet = ({ onImport, onClose, initialUrl = '' }) => {
         text.match(/<h1[^>]*>([^<]+)<\/h1>/);
       setTitle(titleMatch ? titleMatch[1].trim() : '');
 
-      setImages(urls);
-      setSelected(new Set(urls.map((_, i) => i))); // 默认全选
+      // 抓取完就立刻做过滤与去重，让用户看到的列表就是最终可用的图
+      setProgress(`正在分析 ${urls.length} 张图片…`);
+      const prepared = await prepareImages(urls, (done, total) => {
+        setProgress(`正在分析 ${done}/${total}…`);
+      });
+      if (cancelledRef.current) return;
+      setProgress('');
+
+      if (prepared.items.length === 0) {
+        setErrorMessage(
+          `文章里的 ${urls.length} 张图都不适合做字帖（可能是头像、二维码或尺寸过小）。`
+        );
+        setStatus('error');
+        return;
+      }
+
+      setImages(prepared.items);
+      setSelected(new Set(prepared.items.map((_, i) => i))); // 默认全选
+      setFilteredInfo({
+        original: urls.length,
+        kept: prepared.items.length,
+        skipped: prepared.skipped
+      });
       setStatus('done');
       if (usedCache) setErrorMessage('');
     } catch (error) {
@@ -181,73 +204,17 @@ const ImportSheet = ({ onImport, onClose, initialUrl = '' }) => {
     const indices = [...selected].sort((a, b) => a - b);
     if (indices.length === 0) return;
 
-    setImporting(true);
-    const results = [];
-    const dhashes = [];
-    let skipped = 0;
-    try {
-      for (let i = 0; i < indices.length; i += 1) {
-        const index = indices[i];
-        setProgress(`下载并检查 ${i + 1}/${indices.length}`);
-        try {
-          const dataUrl = await fetchImageAsDataUrl(images[index]);
+    // 图片在抓取阶段已经下载并过滤完毕，这里直接使用，无需再下载
+    const results = indices.map((index) => ({
+      url: images[index].url,
+      source: images[index].source,
+      width: images[index].width,
+      height: images[index].height
+    }));
 
-          // 1) 尺寸过滤：剔除头像、二维码、横幅等干扰图
-          const size = readImageSize(dataUrl);
-          if (!looksLikeSticker(size)) {
-            skipped += 1;
-            continue;
-          }
-
-          // 2) 视觉去重：公众号会把同一幅字帖导出成多个尺寸/裁切，
-          //    字节哈希去不掉，必须用感知哈希（dHash）
-          const image = await loadImageForHash(dataUrl);
-          if (!image) {
-            skipped += 1;
-            continue;
-          }
-          const hash = computeDHash(image);
-          const duplicateIndex = dhashes.findIndex((existing) => isSameImage(existing, hash));
-          if (duplicateIndex >= 0) {
-            // 已有视觉相同的图：保留分辨率更高的那一张
-            const existing = results[duplicateIndex];
-            const existingPixels = (existing.width || 0) * (existing.height || 0);
-            const currentPixels = size.width * size.height;
-            if (currentPixels > existingPixels) {
-              results[duplicateIndex] = {
-                url: dataUrl,
-                source: images[index],
-                width: size.width,
-                height: size.height
-              };
-            }
-            skipped += 1;
-            continue;
-          }
-          dhashes.push(hash);
-
-          results.push({ url: dataUrl, source: images[index], width: size.width, height: size.height });
-        } catch (error) {
-          console.error('图片下载失败', images[index], error);
-        }
-        if (cancelledRef.current) break;
-      }
-      setProgress('');
-      if (results.length === 0) {
-        setErrorMessage('没有可用的字帖图片（可能都是头像/二维码等干扰图），请在其他文章重试');
-        setStatus('error');
-        return;
-      }
-      if (skipped > 0) {
-        // 通过回调让 App 显示提示
-        onImport(results, { skipped });
-      } else {
-        onImport(results, { skipped: 0 });
-      }
-    } finally {
-      setImporting(false);
-    }
-  }, [images, onImport, selected]);
+    if (results.length === 0) return;
+    onImport(results, { skipped: filteredInfo ? filteredInfo.skipped : 0 });
+  }, [filteredInfo, images, onImport, selected]);
 
   return (
     <>
@@ -259,7 +226,7 @@ const ImportSheet = ({ onImport, onClose, initialUrl = '' }) => {
             从公众号导入
             {status === 'done' && (
               <span className="section-head__hint" style={{ marginLeft: 8 }}>
-                {images.length} 张图 · 已选 {selected.size}
+                {images.length} 张 · 已选 {selected.size}
               </span>
             )}
           </h3>
@@ -303,15 +270,21 @@ const ImportSheet = ({ onImport, onClose, initialUrl = '' }) => {
           {status === 'done' && (
             <>
               {title && <div className="import-title">{title}</div>}
+              {filteredInfo && filteredInfo.skipped > 0 && (
+                <div className="import-note">
+                  已自动跳过 {filteredInfo.skipped} 张重复或无关的图片
+                  （原图 {filteredInfo.original} 张）
+                </div>
+              )}
               <div className="import-grid">
-                {images.map((imageUrl, index) => (
+                {images.map((image, index) => (
                   <button
                     key={index}
                     className={`import-thumb${selected.has(index) ? ' import-thumb--selected' : ''}`}
                     onClick={() => toggle(index)}
                     aria-label={`第 ${index + 1} 张图`}
                   >
-                    <img src={imageUrl} alt="" loading="lazy" referrerPolicy="no-referrer" />
+                    <img src={image.url} alt="" loading="lazy" referrerPolicy="no-referrer" />
                     {selected.has(index) && (
                       <span className="import-thumb__check">
                         <FaCheck size={11} />
@@ -333,7 +306,7 @@ const ImportSheet = ({ onImport, onClose, initialUrl = '' }) => {
                   setSelected((prev) => (prev.size === images.length ? new Set() : new Set(images.map((_, i) => i))))
                 }
               >
-                {selected.size === images.length ? '全不选' : '全选'}
+                {selected.size === images.length ? '取消全选' : '全选'}
               </button>
               <button
                 className="btn btn--primary btn--block"
@@ -354,6 +327,62 @@ const ImportSheet = ({ onImport, onClose, initialUrl = '' }) => {
       </div>
     </>
   );
+};
+
+/**
+ * 下载全部图片并做「尺寸过滤 + 视觉去重」，返回最终可用的图片列表
+ *
+ * 关键：这一步在**抓取完成后**就执行，而不是等到点导入。
+ * 否则用户会看到一堆重复图，选完才发现被合并掉了。
+ */
+const prepareImages = async (urls, onProgress) => {
+  const items = [];
+  const hashes = [];
+  let skipped = 0;
+
+  for (let i = 0; i < urls.length; i += 1) {
+    if (onProgress) onProgress(i + 1, urls.length);
+    try {
+      const dataUrl = await fetchImageAsDataUrl(urls[i]);
+      const size = readImageSize(dataUrl);
+
+      // 1) 尺寸/比例过滤
+      if (!looksLikeSticker(size)) {
+        skipped += 1;
+        continue;
+      }
+
+      // 2) 视觉去重
+      const image = await loadImageForHash(dataUrl);
+      if (!image) {
+        skipped += 1;
+        continue;
+      }
+      const hash = computeDHash(image);
+      const duplicateIndex = hashes.findIndex((existing) => isSameImage(existing, hash));
+      if (duplicateIndex >= 0) {
+        // 保留分辨率更高的那一张
+        const existing = items[duplicateIndex];
+        if (size.width * size.height > existing.width * existing.height) {
+          items[duplicateIndex] = {
+            url: dataUrl,
+            source: urls[i],
+            width: size.width,
+            height: size.height
+          };
+        }
+        skipped += 1;
+        continue;
+      }
+
+      hashes.push(hash);
+      items.push({ url: dataUrl, source: urls[i], width: size.width, height: size.height });
+    } catch (error) {
+      skipped += 1;
+    }
+  }
+
+  return { items, skipped };
 };
 
 /** 把 data URL 解码成 Image（用于计算感知哈希） */
