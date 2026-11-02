@@ -77,6 +77,8 @@ body {
   background: var(--bg);
   -webkit-font-smoothing: antialiased;
   overscroll-behavior-y: none;
+  /* 防止任何超宽子元素撑出横向滚动条 */
+  overflow-x: hidden;
 }
 
 button {
@@ -993,8 +995,11 @@ button {
 
 .sheet__body {
   overflow-y: auto;
+  overflow-x: hidden;
   -webkit-overflow-scrolling: touch;
   padding: 0 18px 18px;
+  /* 允许 flex 子项收缩，避免长内容撑宽容器 */
+  min-width: 0;
 }
 
 .sheet__footer {
@@ -1166,6 +1171,7 @@ button {
   align-items: center;
   gap: 6px;
   margin-bottom: 10px;
+  min-width: 0;
 }
 
 .import-url-input {
@@ -1184,12 +1190,17 @@ button {
 .import-url-input input {
   flex: 1;
   min-width: 0;
+  width: 100%;
   border: none;
   background: transparent;
   font-family: inherit;
-  font-size: 13px;
+  /* iOS 上 input 字号小于 16px 会在聚焦时自动放大整个页面，
+     这里固定 16px 避免视口被放大（视觉上仍可通过 transform 控制） */
+  font-size: 16px;
   color: var(--ink);
   outline: none;
+  /* 长 URL 横向滚动而不是撑开容器 */
+  text-overflow: ellipsis;
 }
 
 .import-url-input input::placeholder {
