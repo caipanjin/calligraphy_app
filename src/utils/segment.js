@@ -443,6 +443,41 @@ const splitOversized = (boxes, axis) => {
 };
 
 /**
+ * 合并「同一字被切开的部件」
+ *
+ * 无格自由书写时，左右结构的字（如「氵」+主体）中间会有明显空隙，
+ * 投影会把它们切成两块。判据是空隙宽度相对相邻块平均宽度的比例：
+ * 实测同一字的部件间隙约 0.14~0.15，独立字之间 ≥0.34，取 0.25 作分界。
+ */
+export const mergeSplitGlyphs = (bands, threshold = 0.25, referenceSize = 0) => {
+  if (bands.length < 2) return bands;
+  const merged = [{ ...bands[0] }];
+
+  for (let i = 1; i < bands.length; i += 1) {
+    const previous = merged[merged.length - 1];
+    const current = bands[i];
+    const gap = current.start - previous.end;
+    const previousSize = previous.end - previous.start;
+    const currentSize = current.end - current.start;
+    const averageSize = (previousSize + currentSize) / 2;
+
+    // 只有「至少一块明显小于正常字」时才可能是一个字被切开
+    // 正常字的高度/宽度相近，不会出现一大一小的组合
+    const smaller = Math.min(previousSize, currentSize);
+    const normalSize = referenceSize > 0 ? referenceSize : averageSize;
+    const looksLikeFragment = smaller < normalSize * 0.75;
+
+    if (looksLikeFragment && averageSize > 0 && gap < averageSize * threshold) {
+      previous.end = current.end;
+    } else {
+      merged.push({ ...current });
+    }
+  }
+
+  return merged;
+};
+
+/**
  * 列内字数归一：按众数裁掉多出来的框
  * 字帖的每列字数通常一致（末列可能少），个别列多出来的通常是贴边残块或非文字
  */
@@ -500,6 +535,79 @@ const normalizeColumnCounts = (boxes, columnRanges, layout) => {
 };
 
 /**
+ * 拆分过高的字块（竖排专用）
+ *
+ * 竖排时一个字的高度应接近列宽（实测比值 0.7~1.1）。
+ * 若某块明显高于列宽（如 1.44 倍），说明上下两个字粘连，
+ * 应按列宽等分拆开。
+ */
+export const splitTallGlyphs = (bands, referenceSize, maxRatio = 1.25) => {
+  if (bands.length === 0 || referenceSize <= 0) return bands;
+
+  const result = [];
+  bands.forEach((band) => {
+    const size = band.end - band.start;
+    const limit = referenceSize * maxRatio;
+    if (size <= limit) {
+      result.push(band);
+      return;
+    }
+    const parts = Math.max(2, Math.round(size / referenceSize));
+    const step = size / parts;
+    for (let i = 0; i < parts; i += 1) {
+      result.push({
+        start: Math.round(band.start + i * step),
+        end: Math.round(band.start + (i + 1) * step)
+      });
+    }
+  });
+  return result;
+};
+
+/**
+ * 碎片归并：把明显偏小的块合并到相邻块（比关键词合并更稳健）
+ *
+ * 竖排时一个字的高度应接近列宽，若某块高度远小于列宽，
+ * 说明它是被笔画间隙切开的部件，应与相邻块合并。
+ */
+export const absorbFragments = (bands, referenceSize, tolerance = 0.7) => {
+  if (bands.length < 2 || referenceSize <= 0) return bands;
+
+  const sizes = bands.map((band) => band.end - band.start);
+  const sorted = [...sizes].sort((a, b) => a - b);
+  const typical = sorted[Math.floor(sorted.length / 2)];
+  const threshold = Math.min(referenceSize, typical) * tolerance;
+
+  const merged = bands.map((band) => ({ ...band }));
+  // 从小块开始，向相邻较小间隔的一侧合并
+  let index = 0;
+  while (index < merged.length && merged.length > 1) {
+    const band = merged[index];
+    const size = band.end - band.start;
+    if (size >= threshold || merged.length === 1) {
+      index += 1;
+      continue;
+    }
+    const prev = merged[index - 1];
+    const next = merged[index + 1];
+    const gapPrev = prev ? band.start - prev.end : Infinity;
+    const gapNext = next ? next.start - band.end : Infinity;
+
+    if (gapPrev <= gapNext && prev) {
+      prev.end = band.end;
+      merged.splice(index, 1);
+      index = Math.max(0, index - 1);
+    } else if (next) {
+      next.start = band.start;
+      merged.splice(index, 1);
+    } else {
+      index += 1;
+    }
+  }
+  return merged;
+};
+
+/**
  * 主入口：把整幅字帖切成一个个单字
  * @returns {Promise<{boxes: Array, layout: string, columns: number, scale: number, failed: boolean, reason?: string}>}
  */
@@ -536,11 +644,9 @@ export const segmentCharacters = async (imageSrc, options = {}) => {
   // 3) 其余默认竖排（书法字帖的常态）
   // 判定只影响阅读顺序与标签，用户可在面板上手动切换
   const detectLayout = () => {
-    // 只有一列（多行）→ 竖排；只有一行（多列）→ 横排
-    if (colBands.length === 1 && rowBands.length > 1) return 'vertical';
-    if (rowBands.length === 1 && colBands.length > 1) return 'horizontal';
-    // 其余一律按竖排（书法字帖的常态）。规则网格下两种解读切出的框相同，
-    // 只有阅读顺序不同，面板上可一键切换。
+    // 字帖几乎都是竖排，因此默认竖排。
+    // 只有「多列但仅一行」这种明确的横幅形态才判为横排。
+    if (rowBands.length === 1 && colBands.length >= 3) return 'horizontal';
     return 'vertical';
   };
 
@@ -561,13 +667,19 @@ export const segmentCharacters = async (imageSrc, options = {}) => {
     columnCount = colBands.length;
     // 竖排从右往左读
     [...colBands].reverse().forEach((col) => {
-      const charBands = splitBandsByPitch(
-        findBands(projectRows(ink, W, H, col.start, col.end), {
-          relInk: INK_RATIO,
-          minGap: gapRow,
-          minSize: minSizeRow
-        }),
-        pitch
+      const columnWidth = col.end - col.start;
+      // 注意：竖排的列内是按「高度」切字，而 pitch 是横向周期，不能用于此处的等分
+      const charBands = splitTallGlyphs(
+        mergeSplitGlyphs(
+          findBands(projectRows(ink, W, H, col.start, col.end), {
+            relInk: INK_RATIO,
+            minGap: gapRow,
+            minSize: minSizeRow
+          }),
+          0.25,
+          columnWidth
+        ),
+        columnWidth
       );
       columnDetail.push({ width: col.end - col.start, bands: charBands.length, sizes: charBands.map((b) => b.end - b.start) });
       charBands.forEach((band) => {
@@ -585,11 +697,19 @@ export const segmentCharacters = async (imageSrc, options = {}) => {
   } else {
     columnCount = rowBands.length;
     rowBands.forEach((row) => {
-      const charBands = findBands(projectColumns(ink, W, H, row.start, row.end), {
-        relInk: INK_RATIO,
-        minGap: gapCol,
-        minSize: minSizeCol
-      });
+      const rowHeight = row.end - row.start;
+      const charBands = mergeSplitGlyphs(
+        splitBandsByPitch(
+          findBands(projectColumns(ink, W, H, row.start, row.end), {
+            relInk: INK_RATIO,
+            minGap: gapCol,
+            minSize: minSizeCol
+          }),
+          pitch
+        ),
+        0.25,
+        rowHeight
+      );
       charBands.forEach((band) => {
         boxes.push(
           toSource({

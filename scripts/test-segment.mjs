@@ -3,7 +3,7 @@
  * 运行：npm test
  */
 import assert from 'node:assert/strict';
-import { findBands, otsuThreshold, estimatePitch, buildGridBoxes } from '../src/utils/segment.js';
+import { findBands, otsuThreshold, estimatePitch, buildGridBoxes, splitTallGlyphs, mergeSplitGlyphs } from '../src/utils/segment.js';
 import { hashImageData } from '../src/utils/imageHash.js';
 
 let passed = 0;
@@ -143,6 +143,37 @@ check('图片哈希：超长输入仍快速（抽样）', () => {
   hashImageData(big);
   const ms = Date.now() - t0;
   assert.ok(ms < 500, `耗时 ${ms}ms`);
+});
+
+check('竖排：过高的块按列宽拆分', () => {
+  // 列宽 162，块高 234（比值 1.44）应拆成 2 块
+  const out = splitTallGlyphs([{ start: 625, end: 859 }], 162);
+  assert.equal(out.length, 2);
+});
+
+check('竖排：正常高度的块不拆分', () => {
+  const out = splitTallGlyphs([{ start: 48, end: 228 }, { start: 255, end: 385 }], 162);
+  assert.equal(out.length, 2);
+});
+
+check('竖排：部件合并——小碎片紧邻大块时合并', () => {
+  // 小块 40 宽紧贴大块 150 宽，间隙 10（<平均宽 25%）
+  const out = mergeSplitGlyphs(
+    [{ start: 0, end: 40 }, { start: 50, end: 200 }],
+    0.25,
+    160
+  );
+  assert.equal(out.length, 1);
+});
+
+check('竖排：两个正常字之间不合并', () => {
+  // 两块各 150 宽，间隙 100（>平均宽 25%）
+  const out = mergeSplitGlyphs(
+    [{ start: 0, end: 150 }, { start: 250, end: 400 }],
+    0.25,
+    160
+  );
+  assert.equal(out.length, 2);
 });
 
 console.log(`\n${passed} 项通过`);
