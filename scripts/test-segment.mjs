@@ -11,7 +11,8 @@ import {
   splitTallGlyphs,
   mergeSplitGlyphs,
   detectGridLines,
-  boxesFromGridLines
+  boxesFromGridLines,
+  measureGlyphHorizontally
 } from '../src/utils/segment.js';
 import { hashImageData } from '../src/utils/imageHash.js';
 
@@ -237,6 +238,57 @@ check('由格线生成单元格：横排从左往右', () => {
   assert.equal(boxes[0].x, 100);
   assert.equal(boxes[1].x, 200);
   assert.equal(boxes[0].y, boxes[1].y, '前两格同一行');
+});
+
+check('按字取宽：字的墨迹超出列边界时向右扩', () => {
+  const W = 200;
+  const H = 100;
+  const ink = new Uint8Array(W * H);
+  // 列边界 50-100，但字实际占 60-115（右侧超出 15px）
+  for (let y = 10; y < 40; y += 1) {
+    for (let x = 60; x < 115; x += 1) ink[y * W + x] = 1;
+  }
+  const m = measureGlyphHorizontally(ink, W, 10, 40, 50, 100);
+  assert.ok(m.right >= 115, `right=${m.right}`);
+  assert.ok(m.extendRight >= 15, `extendRight=${m.extendRight}`);
+});
+
+check('按字取宽：字的墨迹超出列边界时向左扩', () => {
+  const W = 200;
+  const H = 100;
+  const ink = new Uint8Array(W * H);
+  // 列边界 50-100，字实际占 38-95（左侧超出 12px）
+  for (let y = 10; y < 40; y += 1) {
+    for (let x = 38; x < 95; x += 1) ink[y * W + x] = 1;
+  }
+  const m = measureGlyphHorizontally(ink, W, 10, 40, 50, 100);
+  assert.ok(m.left <= 38, `left=${m.left}`);
+  assert.ok(m.extendLeft >= 12, `extendLeft=${m.extendLeft}`);
+});
+
+check('按字取宽：字未超出时保持列边界', () => {
+  const W = 200;
+  const H = 100;
+  const ink = new Uint8Array(W * H);
+  for (let y = 10; y < 40; y += 1) {
+    for (let x = 55; x < 95; x += 1) ink[y * W + x] = 1;
+  }
+  const m = measureGlyphHorizontally(ink, W, 10, 40, 50, 100);
+  assert.equal(m.left, 50);
+  assert.equal(m.right, 100);
+});
+
+check('按字取宽：扩展有上限，不会无限吞并邻列', () => {
+  const W = 400;
+  const H = 100;
+  const ink = new Uint8Array(W * H);
+  // 整行都有墨迹（模拟无间隔），扩展应被 maxOverflow 限制
+  for (let y = 10; y < 40; y += 1) {
+    for (let x = 0; x < W; x += 1) ink[y * W + x] = 1;
+  }
+  const m = measureGlyphHorizontally(ink, W, 10, 40, 100, 150, 0.5);
+  assert.ok(m.extendLeft <= 25, `extendLeft=${m.extendLeft} 应 <= 25`);
+  assert.ok(m.extendRight <= 25, `extendRight=${m.extendRight} 应 <= 25`);
 });
 
 console.log(`\n${passed} 项通过`);

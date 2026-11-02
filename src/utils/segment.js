@@ -264,6 +264,62 @@ export const estimatePitch = (profile, minRatio = 0.08, maxRatio = 0.4) => {
 };
 
 /**
+ * 取单个字带在垂直方向上的真实水平范围
+ *
+ * 同一列里字的宽度常常不一样（实测列宽 65px，而字最宽可达 83px），
+ * 若直接用列宽当字框宽度，稍宽的字左右会被裁掉。
+ * 这里沿着这一行扫描墨迹，把左右边界扩到字的真实边缘。
+ *
+ * @param {Uint8Array} ink 墨迹掩码
+ * @param {number} width 图宽
+ * @param {number} y0 字带上边界
+ * @param {number} y1 字带下边界
+ * @param {number} colStart 列左边界
+ * @param {number} colEnd 列右边界
+ * @param {number} maxOverflow 允许向两侧扩展的最大比例（相对列宽）
+ */
+export const measureGlyphHorizontally = (
+  ink,
+  width,
+  y0,
+  y1,
+  colStart,
+  colEnd,
+  maxOverflow = 0.6
+) => {
+  const columnWidth = colEnd - colStart;
+  const limit = Math.max(2, Math.round(columnWidth * maxOverflow));
+
+  const hasInkAt = (x) => {
+    for (let y = y0; y < y1; y += 1) {
+      if (ink[y * width + x]) return true;
+    }
+    return false;
+  };
+
+  let left = colStart;
+  let right = colEnd;
+
+  // 从左边界往外扩（遇到空白即停）
+  let extendLeft = 0;
+  for (let x = colStart - 1; x >= Math.max(0, colStart - limit); x -= 1) {
+    if (!hasInkAt(x)) break;
+    left = x;
+    extendLeft += 1;
+  }
+
+  // 从右边界往外扩
+  let extendRight = 0;
+  for (let x = colEnd; x < Math.min(width, colEnd + limit); x += 1) {
+    if (!hasInkAt(x)) break;
+    right = x + 1;
+    extendRight += 1;
+  }
+
+  return { left, right, extendLeft, extendRight };
+};
+
+/**
  * 按阅读顺序排序
  *
  * 竖排：先分列（从右到左），列内从上到下
@@ -855,11 +911,15 @@ export const segmentCharacters = async (imageSrc, options = {}) => {
       );
       columnDetail.push({ width: col.end - col.start, bands: charBands.length, sizes: charBands.map((b) => b.end - b.start) });
       charBands.forEach((band) => {
+        // 按这个字自身的墨迹范围取宽，避免略宽的字被列边界裁掉
+        const measured = measureGlyphHorizontally(ink, W, band.start, band.end, col.start, col.end);
+        const boxLeft = Math.min(col.start, measured.left);
+        const boxRight = Math.max(col.end, measured.right);
         boxes.push(
           toSource({
-            x: col.start,
+            x: boxLeft,
             y: band.start,
-            width: col.end - col.start,
+            width: boxRight - boxLeft,
             height: band.end - band.start
           })
         );
