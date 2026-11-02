@@ -21,11 +21,8 @@ import {
 } from '../utils/segmentCache';
 import { removeBox, mergeBoxes, splitBox, findNearestBoxIndex } from '../utils/boxEdit';
 
-const LAYOUT_OPTIONS = [
-  { value: 'auto', label: '自动' },
-  { value: 'vertical', label: '竖排' },
-  { value: 'horizontal', label: '横排' }
-];
+// 字帖一律竖排，不再提供版面切换
+const LAYOUT_OPTIONS = [{ value: 'vertical', label: '竖排' }];
 
 /**
  * 自动切字抽屉：把整幅字帖按投影切成单字，点任意框直接进入单字临摹
@@ -33,7 +30,7 @@ const LAYOUT_OPTIONS = [
 const SegmentSheet = ({ image, db, onSelectCharacter, onClose }) => {
   const [status, setStatus] = useState('loading');
   const [result, setResult] = useState(null);
-  const [layout, setLayout] = useState('auto');
+  const [layout, setLayout] = useState('vertical');
   const [hasGrid, setHasGrid] = useState(false);
   // 设置是否已从存储恢复（未恢复前不触发切分）
   const [settingsLoaded, setSettingsLoaded] = useState(false);

@@ -264,6 +264,32 @@ export const estimatePitch = (profile, minRatio = 0.08, maxRatio = 0.4) => {
 };
 
 /**
+ * 按阅读顺序排序
+ *
+ * 竖排：先分列（从右到左），列内从上到下
+ * 横排：先分行（从上到下），行内从左到右
+ *
+ * 注意不能「先按 y 分组再按 x 排」——那会变成逐行横向走，与竖排阅读习惯相反。
+ */
+const sortByReadingOrder = (boxes, layout, cellSize) => {
+  const step = Math.max(1, cellSize || 1);
+  if (layout === 'vertical') {
+    boxes.sort((a, b) => {
+      // 竖排从右往左读：x 大的列在前
+      const colDiff = Math.round((b.x - a.x) / (step * 0.5));
+      if (colDiff !== 0) return colDiff;
+      return a.y - b.y; // 同列内从上到下
+    });
+  } else {
+    boxes.sort((a, b) => {
+      const rowDiff = Math.round((a.y - b.y) / (step * 0.5));
+      if (rowDiff !== 0) return rowDiff;
+      return a.x - b.x;
+    });
+  }
+};
+
+/**
  * 墨迹外接框：按投影分位裁剪，忽略边缘阴影/杂质
  * （直接用极值会被照片边缘的暗边污染，导致整张网格偏移）
  */
@@ -433,75 +459,9 @@ export const buildGridBoxes = (ink, width, height, pitch, layout = 'vertical') =
   }
 
   // 阅读顺序：竖排从右往左、横排从左往右
-  boxes.sort((a, b) => {
-    const rowDiff = Math.round((a.y - b.y) / Math.max(1, cellHeight * 0.5));
-    if (rowDiff !== 0) return rowDiff;
-    return layout === 'vertical' ? b.x - a.x : a.x - b.x;
-  });
+  sortByReadingOrder(boxes, layout, cellWidth);
 
   return boxes;
-};
-
-/** 把明显偏大（多个字粘在一起）的字块按中位尺寸等分 */
-const splitOversized = (boxes, axis) => {
-  if (boxes.length < 3) return boxes;
-  const sizes = boxes.map((box) => (axis === 'vertical' ? box.height : box.width));
-  const typical = median(sizes);
-  if (!typical) return boxes;
-
-  const result = [];
-  boxes.forEach((box) => {
-    const size = axis === 'vertical' ? box.height : box.width;
-    const parts = Math.round(size / typical);
-    if (parts <= 1 || size < typical * MERGE_FACTOR) {
-      result.push(box);
-      return;
-    }
-    const step = size / parts;
-    for (let i = 0; i < parts; i += 1) {
-      result.push(
-        axis === 'vertical'
-          ? { ...box, y: box.y + step * i, height: step }
-          : { ...box, x: box.x + step * i, width: step }
-      );
-    }
-  });
-  return result;
-};
-
-/**
- * 合并「同一字被切开的部件」
- *
- * 无格自由书写时，左右结构的字（如「氵」+主体）中间会有明显空隙，
- * 投影会把它们切成两块。判据是空隙宽度相对相邻块平均宽度的比例：
- * 实测同一字的部件间隙约 0.14~0.15，独立字之间 ≥0.34，取 0.25 作分界。
- */
-export const mergeSplitGlyphs = (bands, threshold = 0.25, referenceSize = 0) => {
-  if (bands.length < 2) return bands;
-  const merged = [{ ...bands[0] }];
-
-  for (let i = 1; i < bands.length; i += 1) {
-    const previous = merged[merged.length - 1];
-    const current = bands[i];
-    const gap = current.start - previous.end;
-    const previousSize = previous.end - previous.start;
-    const currentSize = current.end - current.start;
-    const averageSize = (previousSize + currentSize) / 2;
-
-    // 只有「至少一块明显小于正常字」时才可能是一个字被切开
-    // 正常字的高度/宽度相近，不会出现一大一小的组合
-    const smaller = Math.min(previousSize, currentSize);
-    const normalSize = referenceSize > 0 ? referenceSize : averageSize;
-    const looksLikeFragment = smaller < normalSize * 0.75;
-
-    if (looksLikeFragment && averageSize > 0 && gap < averageSize * threshold) {
-      previous.end = current.end;
-    } else {
-      merged.push({ ...current });
-    }
-  }
-
-  return merged;
 };
 
 /**
@@ -593,6 +553,40 @@ const normalizeColumnCounts = (boxes, columnRanges, layout) => {
   });
 
   return kept.length > 0 ? kept : boxes;
+};
+
+/**
+ * 合并「同一字被切开的部件」
+ *
+ * 无格自由书写时，左右结构的字（如「氵」+主体）中间会有明显空隙，
+ * 投影会把它们切成两块。判据是空隙宽度相对相邻块平均宽度的比例：
+ * 实测同一字的部件间隙约 0.14~0.15，独立字之间 >=0.34，取 0.25 作分界。
+ */
+export const mergeSplitGlyphs = (bands, threshold = 0.25, referenceSize = 0) => {
+  if (bands.length < 2) return bands;
+  const merged = [{ ...bands[0] }];
+
+  for (let i = 1; i < bands.length; i += 1) {
+    const previous = merged[merged.length - 1];
+    const current = bands[i];
+    const gap = current.start - previous.end;
+    const previousSize = previous.end - previous.start;
+    const currentSize = current.end - current.start;
+    const averageSize = (previousSize + currentSize) / 2;
+
+    // 只有「至少一块明显小于正常字」时才可能是一个字被切开
+    const smaller = Math.min(previousSize, currentSize);
+    const normalSize = referenceSize > 0 ? referenceSize : averageSize;
+    const looksLikeFragment = smaller < normalSize * 0.75;
+
+    if (looksLikeFragment && averageSize > 0 && gap < averageSize * threshold) {
+      previous.end = current.end;
+    } else {
+      merged.push({ ...current });
+    }
+  }
+
+  return merged;
 };
 
 /**
@@ -781,13 +775,9 @@ export const boxesFromGridLines = (grid, layout = 'vertical') => {
     }
   }
 
-  // 用行高的一半作为分组步长，避免不同行被误判为同一行
-  const rowStep = Math.max(1, (horizontal[horizontal.length - 1] - horizontal[0]) / (horizontal.length - 1));
-  boxes.sort((a, b) => {
-    const rowDiff = Math.round((a.y - b.y) / (rowStep * 0.5));
-    if (rowDiff !== 0) return rowDiff;
-    return layout === 'vertical' ? b.x - a.x : a.x - b.x;
-  });
+  const cellWidth =
+    (vertical[vertical.length - 1] - vertical[0]) / Math.max(1, vertical.length - 1);
+  sortByReadingOrder(boxes, layout, cellWidth);
 
   return boxes;
 };
@@ -828,12 +818,8 @@ export const segmentCharacters = async (imageSrc, options = {}) => {
   // 2) 少行多列（行数 ≤2 且列数 ≥3）→ 横排
   // 3) 其余默认竖排（书法字帖的常态）
   // 判定只影响阅读顺序与标签，用户可在面板上手动切换
-  const detectLayout = () => {
-    // 字帖几乎都是竖排，因此默认竖排。
-    // 只有「多列但仅一行」这种明确的横幅形态才判为横排。
-    if (rowBands.length === 1 && colBands.length >= 3) return 'horizontal';
-    return 'vertical';
-  };
+  // 字帖一律按竖排处理（中文书法几乎都是竖排，自上而下、从右往左）
+  const detectLayout = () => 'vertical';
 
   let layout = forcedLayout !== 'auto' ? forcedLayout : detectLayout();
 
@@ -851,7 +837,8 @@ export const segmentCharacters = async (imageSrc, options = {}) => {
   if (layout === 'vertical') {
     columnCount = colBands.length;
     // 竖排从右往左读
-    [...colBands].reverse().forEach((col) => {
+    // 遍历顺序无关紧要：最终顺序由 sortByReadingOrder 统一决定
+    colBands.forEach((col) => {
       const columnWidth = col.end - col.start;
       // 注意：竖排的列内是按「高度」切字，而 pitch 是横向周期，不能用于此处的等分
       const charBands = splitTallGlyphs(
@@ -879,34 +866,7 @@ export const segmentCharacters = async (imageSrc, options = {}) => {
       });
     });
     // 竖排的高度拆分已由 splitTallGlyphs 按列宽完成，这里不再重复按中位值拆分
-  } else {
-    columnCount = rowBands.length;
-    rowBands.forEach((row) => {
-      const rowHeight = row.end - row.start;
-      const charBands = mergeSplitGlyphs(
-        splitBandsByPitch(
-          findBands(projectColumns(ink, W, H, row.start, row.end), {
-            relInk: INK_RATIO,
-            minGap: gapCol,
-            minSize: minSizeCol
-          }),
-          pitch
-        ),
-        0.25,
-        rowHeight
-      );
-      charBands.forEach((band) => {
-        boxes.push(
-          toSource({
-            x: band.start,
-            y: row.start,
-            width: band.end - band.start,
-            height: row.end - row.start
-          })
-        );
-      });
-    });
-    boxes = splitOversized(boxes, 'horizontal');
+    sortByReadingOrder(boxes, 'vertical', median(colBands.map((band) => band.end - band.start)) / scale);
   }
 
   // 有格字帖：格线本身就是最可靠的分隔，直接用它生成单元格
@@ -983,11 +943,11 @@ export const segmentCharacters = async (imageSrc, options = {}) => {
 
   // 列内字数归一（去掉多出来的残块）
   if (usable.length > 0) {
-    const ranges =
-      layout === 'vertical'
-        ? colBands.map((band) => ({ start: band.start / scale, end: band.end / scale }))
-        : rowBands.map((band) => ({ start: band.start / scale, end: band.end / scale }));
+    const ranges = colBands.map((band) => ({ start: band.start / scale, end: band.end / scale }));
     usable = normalizeColumnCounts(usable, ranges, layout);
+    // 归一过程会按分组重建数组，这里恢复阅读顺序
+    const columnWidth = median(colBands.map((band) => band.end - band.start)) / scale;
+    sortByReadingOrder(usable, layout, columnWidth);
   }
 
   if (usable.length === 0) {

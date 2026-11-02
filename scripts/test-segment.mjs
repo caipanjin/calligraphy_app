@@ -113,9 +113,10 @@ check('网格拟合：3 列 × 2 行，竖排从右往左', () => {
   }
   const boxes = buildGridBoxes(ink, W, H, 100, 'vertical');
   assert.equal(boxes.length, 6);
-  // 竖排第一个应是右上角
-  assert.ok(boxes[0].x > boxes[1].x, '首格应在右侧');
-  assert.ok(Math.abs(boxes[0].y - boxes[1].y) < 1, '前两格同一行');
+  // 竖排：先走完右列（同列 y 递增），再换到左列
+  assert.ok(boxes[0].x > boxes[1].x || Math.abs(boxes[0].x - boxes[1].x) < 1, '首格在最右列');
+  assert.ok(Math.abs(boxes[0].x - boxes[1].x) < 1, '前两格在同一列');
+  assert.ok(boxes[1].y > boxes[0].y, '同列内 y 递增');
 });
 
 check('网格拟合：空白区域不产出字框', () => {
@@ -221,15 +222,21 @@ check('由格线生成单元格：竖排从右往左', () => {
   const grid = { vertical: [100, 200, 300], horizontal: [100, 200, 300] };
   const boxes = boxesFromGridLines(grid, 'vertical');
   assert.equal(boxes.length, 4);
-  // 首格应在右侧（x 最大）
-  assert.ok(boxes[0].x > boxes[1].x, `首格 x=${boxes[0].x}, 第二格 x=${boxes[1].x}`);
+  // 竖排：先右列自上而下，再左列
+  assert.equal(boxes[0].x, 200, '首格在最右列');
+  assert.equal(boxes[1].x, 200, '第二格仍在右列');
+  assert.ok(boxes[1].y > boxes[0].y, '同列内 y 递增');
+  assert.equal(boxes[2].x, 100, '第三格换到左列');
 });
 
 check('由格线生成单元格：横排从左往右', () => {
   const grid = { vertical: [100, 200, 300], horizontal: [100, 200, 300] };
   const boxes = boxesFromGridLines(grid, 'horizontal');
   assert.equal(boxes.length, 4);
-  assert.ok(boxes[0].x < boxes[1].x, `首格 x=${boxes[0].x}, 第二格 x=${boxes[1].x}`);
+  // 横排：先上行从左到右
+  assert.equal(boxes[0].x, 100);
+  assert.equal(boxes[1].x, 200);
+  assert.equal(boxes[0].y, boxes[1].y, '前两格同一行');
 });
 
 console.log(`\n${passed} 项通过`);

@@ -80,6 +80,8 @@ const PracticeView = ({
   // 已保存的切分网格（打开字帖即加载，直接叠在图上点选）
   const [savedBoxes, setSavedBoxes] = useState(null);
   const [savedLayout, setSavedLayout] = useState('vertical');
+  // 图片原始尺寸（渲染网格用；不能依赖 ref，ref 在重新挂载时是 null）
+  const [naturalSize, setNaturalSize] = useState({ width: 0, height: 0 });
 
   const isCharMode = Boolean(selectedCharacter);
 
@@ -96,6 +98,25 @@ const PracticeView = ({
 
     const load = async () => {
       const prefix = `${hashImageData(image)}:`;
+
+      // 记录图片原始尺寸（供网格定位）
+      try {
+        const probe = new Image();
+        probe.src = image;
+        await new Promise((resolve, reject) => {
+          probe.onload = resolve;
+          probe.onerror = reject;
+        });
+        if (!cancelled) {
+          setNaturalSize({
+            width: probe.naturalWidth || probe.width,
+            height: probe.naturalHeight || probe.height
+          });
+        }
+      } catch (error) {
+        /* 尺寸拿不到时网格不渲染，不影响其他功能 */
+      }
+      if (cancelled) return;
 
       // 先读这张字帖的设置：它决定了该用哪份缓存
       const settings = await readSettings(db, hashImageData(image));
@@ -167,10 +188,8 @@ const PracticeView = ({
 
   // 点击已切好的框直接进入临摹
   const handleSavedBoxClick = (box, index) => {
-    const frame = frameRef.current;
-    const img = frame ? frame.querySelector('img') : null;
-    const naturalWidth = img ? img.naturalWidth || img.width : 0;
-    const naturalHeight = img ? img.naturalHeight || img.height : 0;
+    const naturalWidth = naturalSize.width;
+    const naturalHeight = naturalSize.height;
     if (!naturalWidth || !naturalHeight) return;
 
     const padding = Math.max(2, Math.round(Math.min(box.width, box.height) * 0.06));
@@ -544,12 +563,9 @@ const PracticeView = ({
             />
             {savedBoxes && savedBoxes.length > 0 ? (
               <div className="stage-grid">
-                {savedBoxes.map((box, index) => {
-                  const frame = frameRef.current;
-                  const img = frame ? frame.querySelector('img') : null;
-                  const nw = img ? img.naturalWidth || img.width : 0;
-                  const nh = img ? img.naturalHeight || img.height : 0;
-                  if (!nw || !nh) return null;
+                {naturalSize.width > 0 && savedBoxes.map((box, index) => {
+                  const nw = naturalSize.width;
+                  const nh = naturalSize.height;
                   return (
                     <button
                       key={`${index}-${Math.round(box.x)}-${Math.round(box.y)}`}
