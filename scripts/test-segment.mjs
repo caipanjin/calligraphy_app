@@ -12,7 +12,8 @@ import {
   mergeSplitGlyphs,
   detectGridLines,
   boxesFromGridLines,
-  measureGlyphHorizontally
+  measureGlyphHorizontally,
+  measureGlyphVertically
 } from '../src/utils/segment.js';
 import { hashImageData } from '../src/utils/imageHash.js';
 
@@ -289,6 +290,57 @@ check('按字取宽：扩展有上限，不会无限吞并邻列', () => {
   const m = measureGlyphHorizontally(ink, W, 10, 40, 100, 150, 0.5);
   assert.ok(m.extendLeft <= 25, `extendLeft=${m.extendLeft} 应 <= 25`);
   assert.ok(m.extendRight <= 25, `extendRight=${m.extendRight} 应 <= 25`);
+});
+
+check('按字取高：笔画向下探出时扩到下边界', () => {
+  const W = 100;
+  const H = 200;
+  const ink = new Uint8Array(W * H);
+  // 字带 y40-100，但笔画延伸到 y130
+  for (let y = 40; y < 130; y += 1) {
+    for (let x = 30; x < 70; x += 1) ink[y * W + x] = 1;
+  }
+  const m = measureGlyphVertically(ink, W, H, 30, 70, 40, 100);
+  assert.ok(m.bottom >= 130, `bottom=${m.bottom}`);
+  assert.ok(m.extendDown >= 30, `extendDown=${m.extendDown}`);
+});
+
+check('按字取高：笔画向上探出时扩到上边界', () => {
+  const W = 100;
+  const H = 200;
+  const ink = new Uint8Array(W * H);
+  for (let y = 15; y < 80; y += 1) {
+    for (let x = 30; x < 70; x += 1) ink[y * W + x] = 1;
+  }
+  const m = measureGlyphVertically(ink, W, H, 30, 70, 40, 80);
+  // 扫描允许穿越少量空白，边界可能比真实墨迹再外扩 1~3px，用容差判定
+  assert.ok(m.top <= 18, `top=${m.top} 应在 15 附近`);
+  assert.ok(m.extendUp >= 22, `extendUp=${m.extendUp}`);
+});
+
+check('按字取高：未探出时保持原边界', () => {
+  const W = 100;
+  const H = 200;
+  const ink = new Uint8Array(W * H);
+  for (let y = 45; y < 75; y += 1) {
+    for (let x = 30; x < 70; x += 1) ink[y * W + x] = 1;
+  }
+  const m = measureGlyphVertically(ink, W, H, 30, 70, 40, 80);
+  assert.equal(m.top, 40);
+  assert.equal(m.bottom, 80);
+});
+
+check('按字取高：扩展有上限', () => {
+  const W = 100;
+  const H = 400;
+  const ink = new Uint8Array(W * H);
+  // 整列都有墨迹，扩展应被 maxOverflow 限制
+  for (let y = 0; y < H; y += 1) {
+    for (let x = 30; x < 70; x += 1) ink[y * W + x] = 1;
+  }
+  const m = measureGlyphVertically(ink, W, H, 30, 70, 150, 250, 0.5);
+  assert.ok(m.extendUp <= 50, `extendUp=${m.extendUp} 应 <= 50`);
+  assert.ok(m.extendDown <= 50, `extendDown=${m.extendDown} 应 <= 50`);
 });
 
 console.log(`\n${passed} 项通过`);

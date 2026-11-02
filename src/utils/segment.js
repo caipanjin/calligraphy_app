@@ -297,26 +297,95 @@ export const measureGlyphHorizontally = (
     return false;
   };
 
-  let left = colStart;
-  let right = colEnd;
+  // 允许穿过少量空白（笔画边缘抗锯齿会造成 1~3px 的浅色断点）
+  const TOLERANCE = 3;
 
-  // 从左边界往外扩（遇到空白即停）
+  let left = colStart;
   let extendLeft = 0;
+  let gap = 0;
   for (let x = colStart - 1; x >= Math.max(0, colStart - limit); x -= 1) {
-    if (!hasInkAt(x)) break;
-    left = x;
-    extendLeft += 1;
+    if (hasInkAt(x)) {
+      left = x;
+      extendLeft = colStart - x;
+      gap = 0;
+    } else if (++gap > TOLERANCE) {
+      break;
+    }
   }
 
-  // 从右边界往外扩
+  let right = colEnd;
   let extendRight = 0;
+  gap = 0;
   for (let x = colEnd; x < Math.min(width, colEnd + limit); x += 1) {
-    if (!hasInkAt(x)) break;
-    right = x + 1;
-    extendRight += 1;
+    if (hasInkAt(x)) {
+      right = x + 1;
+      extendRight = x + 1 - colEnd;
+      gap = 0;
+    } else if (++gap > TOLERANCE) {
+      break;
+    }
   }
 
   return { left, right, extendLeft, extendRight };
+};
+
+/**
+ * 取单个字带垂直方向的真实上下范围
+ *
+ * 与水平方向同理：切分只保证「大概在一个字的高度内」，
+ * 但笔画可能上下探出（如长竖、末笔下沉），直接用字带边界会裁掉。
+ * 这里在字的水平范围内向上/下扫描墨迹，扩到真实边缘。
+ */
+export const measureGlyphVertically = (
+  ink,
+  width,
+  height,
+  x0,
+  x1,
+  y0,
+  y1,
+  maxOverflow = 0.6
+) => {
+  const bandHeight = y1 - y0;
+  const limit = Math.max(2, Math.round(bandHeight * maxOverflow));
+
+  const hasInkAt = (y) => {
+    const base = y * width;
+    for (let x = x0; x < x1; x += 1) {
+      if (ink[base + x]) return true;
+    }
+    return false;
+  };
+
+  const TOLERANCE = 3;
+
+  let top = y0;
+  let extendUp = 0;
+  let gap = 0;
+  for (let y = y0 - 1; y >= Math.max(0, y0 - limit); y -= 1) {
+    if (hasInkAt(y)) {
+      top = y;
+      extendUp = y0 - y;
+      gap = 0;
+    } else if (++gap > TOLERANCE) {
+      break;
+    }
+  }
+
+  let bottom = y1;
+  let extendDown = 0;
+  gap = 0;
+  for (let y = y1; y < Math.min(height, y1 + limit); y += 1) {
+    if (hasInkAt(y)) {
+      bottom = y + 1;
+      extendDown = y + 1 - y1;
+      gap = 0;
+    } else if (++gap > TOLERANCE) {
+      break;
+    }
+  }
+
+  return { top, bottom, extendUp, extendDown };
 };
 
 /**
@@ -911,16 +980,30 @@ export const segmentCharacters = async (imageSrc, options = {}) => {
       );
       columnDetail.push({ width: col.end - col.start, bands: charBands.length, sizes: charBands.map((b) => b.end - b.start) });
       charBands.forEach((band) => {
-        // 按这个字自身的墨迹范围取宽，避免略宽的字被列边界裁掉
+        // 1) 先按字自身墨迹取宽，避免略宽的字被列边界裁掉
         const measured = measureGlyphHorizontally(ink, W, band.start, band.end, col.start, col.end);
         const boxLeft = Math.min(col.start, measured.left);
         const boxRight = Math.max(col.end, measured.right);
+
+        // 2) 再在这个宽度内取真实上下边界，避免笔画探出被裁
+        const vertical = measureGlyphVertically(
+          ink,
+          W,
+          H,
+          boxLeft,
+          boxRight,
+          band.start,
+          band.end
+        );
+        const boxTop = Math.min(band.start, vertical.top);
+        const boxBottom = Math.max(band.end, vertical.bottom);
+
         boxes.push(
           toSource({
             x: boxLeft,
-            y: band.start,
+            y: boxTop,
             width: boxRight - boxLeft,
-            height: band.end - band.start
+            height: boxBottom - boxTop
           })
         );
       });
