@@ -96,37 +96,40 @@ const PracticeView = ({
 
     const load = async () => {
       const prefix = `${hashImageData(image)}:`;
-      // 版面模式 + 是否有格 共 6 种组合，优先取手动结果
-      const layouts = ['auto', 'vertical', 'horizontal'];
-      const variants = ['free', 'grid'];
+
+      // 先读这张字帖的设置：它决定了该用哪份缓存
+      const settings = await readSettings(db, hashImageData(image));
+      if (cancelled) return;
+      const desiredLayout = settings && settings.layout ? settings.layout : 'auto';
+      const desiredGrid = Boolean(settings && settings.hasGrid);
+
+      // 按「设置对应的键」优先查找：手动结果 > 自动结果
+      const preferredKeys = [
+        `${prefix}${desiredLayout}:${desiredGrid ? 'grid' : 'free'}`,
+        // 兼容旧数据：同 layout 的另一变体
+        `${prefix}${desiredLayout}:${desiredGrid ? 'free' : 'grid'}`
+      ];
 
       let found = null;
-      for (const layoutMode of layouts) {
-        for (const variant of variants) {
-          const key = `${prefix}${layoutMode}:${variant}`;
-          const manual = await readSegmentation(db, `${key}:manual`);
-          if (cancelled) return;
-          if (manual && manual.boxes && manual.boxes.length > 0) {
-            found = { boxes: manual.boxes, layout: manual.layout || 'vertical' };
-            break;
-          }
-          const auto = await readSegmentation(db, key);
-          if (cancelled) return;
-          if (!found && auto && auto.boxes && auto.boxes.length > 0) {
-            found = { boxes: auto.boxes, layout: auto.layout || 'vertical' };
-          }
+      for (const key of preferredKeys) {
+        const manual = await readSegmentation(db, `${key}:manual`);
+        if (cancelled) return;
+        if (manual && manual.boxes && manual.boxes.length > 0) {
+          found = { boxes: manual.boxes, layout: manual.layout || 'vertical' };
+          break;
         }
-        if (found && found.layout) break;
+        const auto = await readSegmentation(db, key);
+        if (cancelled) return;
+        if (auto && auto.boxes && auto.boxes.length > 0) {
+          found = { boxes: auto.boxes, layout: auto.layout || 'vertical' };
+          break;
+        }
       }
+
       if (cancelled) return;
 
-      // 没有任何缓存：按该字帖已保存的设置（版面模式 / 是否带格子线）自动切分一次
+      // 仍然没有：按设置主动切分一次
       if (!found) {
-        const settings = await readSettings(db, hashImageData(image));
-        if (cancelled) return;
-        const desiredLayout = settings && settings.layout ? settings.layout : 'auto';
-        const desiredGrid = Boolean(settings && settings.hasGrid);
-
         try {
           const segmentation = await segmentCharacters(image, {
             layout: desiredLayout,
@@ -135,7 +138,6 @@ const PracticeView = ({
           if (cancelled) return;
           if (segmentation && !segmentation.failed && segmentation.boxes.length > 0) {
             found = { boxes: segmentation.boxes, layout: segmentation.layout || 'vertical' };
-            // 写回缓存，下次直接读取
             writeSegmentation(db, `${prefix}${desiredLayout}:${desiredGrid ? 'grid' : 'free'}`, {
               boxes: segmentation.boxes,
               layout: segmentation.layout,
@@ -145,7 +147,7 @@ const PracticeView = ({
             });
           }
         } catch (error) {
-          // 自动切分失败时静默退回手动点选
+          // 切分失败时退回手动点选
         }
       }
 
