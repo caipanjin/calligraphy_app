@@ -3,6 +3,7 @@ import './index.css';
 import Library, { MAX_STICKERS } from './components/Library';
 import PracticeView from './components/PracticeView';
 import SegmentSheet from './components/SegmentSheet';
+import ImportSheet from './components/ImportSheet';
 import SettingsView from './components/SettingsView';
 import Toast from './components/Toast';
 import { hashImageData } from './utils/imageHash';
@@ -40,6 +41,14 @@ const isValidImageDataUrl = (dataUrl) => {
 };
 
 /** 把某张字帖提到列表最前，并裁剪到上限 */
+/** 估算 data URL 的字节大小（base64 长度 × 3/4） */
+const estimateDataUrlSize = (dataUrl) => {
+  if (typeof dataUrl !== 'string') return 0;
+  const commaIndex = dataUrl.indexOf(',');
+  const base64 = commaIndex >= 0 ? dataUrl.slice(commaIndex + 1) : dataUrl;
+  return Math.round((base64.length * 3) / 4);
+};
+
 const promoteRecent = (list, item) => {
   const rest = list.filter((entry) => entry.url !== item.url);
   return [item, ...rest].slice(0, MAX_STICKERS);
@@ -53,6 +62,7 @@ const App = () => {
   const [mode, setMode] = useState('library');
   const [selectedCharacter, setSelectedCharacter] = useState(null);
   const [showSegment, setShowSegment] = useState(false);
+  const [showImport, setShowImport] = useState(false);
   // 每张字帖的练习进度：{ [url]: { practiced, total } }
   const [progressMap, setProgressMap] = useState({});
   // 切分结果变更的版本号：切分面板改动后，临摹页据此重新读取已存网格
@@ -300,6 +310,28 @@ const App = () => {
     [openPractice, showToast, updateRecent]
   );
 
+  // 从公众号导入的图片（已是 data URL）
+  const handleImportImages = useCallback(
+    async (items) => {
+      if (!items || items.length === 0) return;
+      let next = recentRef.current;
+      const imported = [];
+      for (const item of items) {
+        const entry = { url: item.url, addedAt: Date.now(), size: estimateDataUrlSize(item.url) };
+        next = promoteRecent(next, entry);
+        imported.push(entry);
+      }
+      updateRecent(next);
+      setShowImport(false);
+      setImage(imported[imported.length - 1].url);
+      setSelectedCharacter(null);
+      setMode('practice');
+      persistCurrent(imported[imported.length - 1].url);
+      showToast(`已导入 ${imported.length} 张字帖`);
+    },
+    [persistCurrent, showToast, updateRecent]
+  );
+
   const handlePickFiles = useCallback(() => {
     if (fileInputRef.current) fileInputRef.current.click();
   }, []);
@@ -473,6 +505,7 @@ const App = () => {
                 onRequestDelete={setDeleteIndex}
                 onPickFiles={handlePickFiles}
                 progressMap={progressMap}
+                onImport={() => setShowImport(true)}
               />
             )}
           </main>
@@ -508,6 +541,13 @@ const App = () => {
             setShowSegment(false);
             setGridVersion((value) => value + 1);
           }}
+        />
+      )}
+
+      {showImport && (
+        <ImportSheet
+          onImport={handleImportImages}
+          onClose={() => setShowImport(false)}
         />
       )}
 

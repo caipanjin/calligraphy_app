@@ -7,7 +7,7 @@
             "start": "vite --host 0.0.0.0",
             "dev": "vite --host 0.0.0.0",
             "build": "vite build",
-            "test": "node scripts/test-segment.mjs && node scripts/test-boxedit.mjs && node scripts/test-cache.mjs && node scripts/test-practice.mjs",
+            "test": "node scripts/test-segment.mjs && node scripts/test-boxedit.mjs && node scripts/test-cache.mjs && node scripts/test-practice.mjs && node scripts/test-wechat.mjs",
             "ios:copy": "npm run build && npx cap copy ios",
             "ios:sync": "npm run build && npx cap sync ios",
             "ios:open": "npm run build && npx cap sync ios && npx cap open ios",

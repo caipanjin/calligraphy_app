@@ -1159,6 +1159,99 @@ button {
   opacity: 0.8;
 }
 
+/* ---------------- 从公众号导入 ---------------- */
+
+.import-url-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.import-url-input {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 12px;
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+  color: var(--ink-3);
+  min-width: 0;
+}
+
+.import-url-input input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  font-family: inherit;
+  font-size: 13px;
+  color: var(--ink);
+  outline: none;
+}
+
+.import-url-input input::placeholder {
+  color: var(--ink-3);
+}
+
+.import-fetch {
+  margin-bottom: 12px;
+}
+
+.import-title {
+  margin-bottom: 10px;
+  font-size: 13px;
+  color: var(--ink-2);
+  letter-spacing: 0.02em;
+  line-height: 1.5;
+}
+
+.import-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.import-thumb {
+  position: relative;
+  aspect-ratio: 1;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background: var(--surface-2);
+  outline: 2px solid transparent;
+  transition: outline-color 0.15s, transform 0.1s;
+}
+
+.import-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.import-thumb--selected {
+  outline-color: var(--accent);
+}
+
+.import-thumb:active {
+  transform: scale(0.96);
+}
+
+.import-thumb__check {
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+}
+
 /* ---------------- 设置页 ---------------- */
 
 .settings-group {

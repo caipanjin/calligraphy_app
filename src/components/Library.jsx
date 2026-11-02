@@ -1,5 +1,5 @@
 import React from 'react';
-import { FaPlus, FaEllipsisH, FaFeatherAlt, FaImages } from 'react-icons/fa';
+import { FaPlus, FaEllipsisH, FaFeatherAlt, FaImages, FaLink } from 'react-icons/fa';
 
 /** 最近图片列表上限 */
 export const MAX_STICKERS = 5;
@@ -20,7 +20,7 @@ const formatSize = (bytes) => {
 /**
  * 字帖库：网格卡片 + 添加入口 + 空状态
  */
-const Library = ({ images, currentImage, onOpen, onRequestDelete, onPickFiles, progressMap = {} }) => {
+const Library = ({ images, currentImage, onOpen, onRequestDelete, onPickFiles, progressMap = {}, onImport }) => {
   return (
     <>
       {images.length === 0 ? (
@@ -37,6 +37,10 @@ const Library = ({ images, currentImage, onOpen, onRequestDelete, onPickFiles, p
           <button className="btn btn--primary" onClick={onPickFiles}>
             <FaPlus />
             上传字帖
+          </button>
+          <button className="btn btn--ghost" style={{ marginTop: 10 }} onClick={onImport}>
+            <FaLink size={13} />
+            从公众号导入
           </button>
           <p className="section-head__hint" style={{ marginTop: 14 }}>
             支持 JPG / PNG / WebP，单次最多 {MAX_STICKERS} 张
@@ -107,6 +111,11 @@ const Library = ({ images, currentImage, onOpen, onRequestDelete, onPickFiles, p
                 添加字帖
               </button>
             )}
+
+            <button className="add-card" onClick={onImport}>
+              <FaLink size={22} />
+              从公众号导入
+            </button>
           </div>
 
           <div className="section-head" style={{ marginTop: 22 }}>
