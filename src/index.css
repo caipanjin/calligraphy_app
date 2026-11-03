@@ -550,13 +550,27 @@ button {
   flex: 1;
   display: flex;
   flex-direction: column;
-  justify-content: center;
+  justify-content: flex-start;
   min-height: 0;
   padding: 8px 12px 0;
 }
 
 .practice__body .stage-frame {
   flex: 0 1 auto;
+  min-height: 0;
+  /* 宽高比由图片真实比例决定（见 PracticeView 的 aspectRatio），
+     这样容器与图片完全重合，切分框的百分比定位才准确 */
+  max-height: 100%;
+  margin: 0 auto;
+}
+
+/* 字帖图片：填满容器（容器比例已按图片设置，所以不会变形也不会裁切） */
+.stage-frame .stage-image,
+.stage-frame .stage-image img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
 }
 
 /* 单字模式：画布 + 全景 + 滑轨为一组居中，工具栏贴底 */
@@ -601,7 +615,7 @@ button {
 .stage-hint {
   position: absolute;
   left: 50%;
-  bottom: 12px;
+  bottom: 8px;
   transform: translateX(-50%);
   z-index: 3;
   display: inline-flex;
@@ -615,7 +629,7 @@ button {
   background: rgba(20, 19, 15, 0.55);
   backdrop-filter: blur(8px);
   pointer-events: none;
-  animation: hint-in 0.5s ease 0.6s both;
+  animation: hint-in 0.5s ease 0.6s both, hint-out 0.6s ease 4.5s both;
 }
 
 @keyframes hint-in {
@@ -626,6 +640,17 @@ button {
   to {
     opacity: 1;
     transform: translate(-50%, 0);
+  }
+}
+
+/* 提示 4.5 秒后淡出，避免长期压住字帖内容 */
+@keyframes hint-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+    visibility: hidden;
   }
 }
 

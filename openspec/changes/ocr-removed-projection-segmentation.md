@@ -894,6 +894,45 @@ URL 提取 7 张
 
 npm test 共 74 项（新增正文提取 5 项）
 
+## 第二十四轮：修复长图在临摹页被上下裁切
+
+### 现象
+
+导入文章 `bPLmHqqI7iiCI-_9O8QbAA` 的图片（1080x1440，比例 0.75）后，
+临摹页显示时**上下被裁掉一部分**。
+
+### 根因
+
+`stage-frame` 的 `overflow: hidden` + 图片只设 `width: 100%; height: auto`：
+
+- 图片按宽度撑开 → 高度按比例算得 1440/1080 × 容器宽
+- 该高度**超出容器可用高度** → 被 `overflow: hidden` 裁掉
+- 容器 `align-items: center` → 上下各裁一半
+
+### 修正
+
+1. **容器宽高比绑定图片真实比例**：给 `.stage-frame` 设
+   `aspectRatio: naturalWidth / naturalHeight`，容器与图片完全重合
+2. 图片改为 `width: 100%; height: 100%; object-fit: contain` 填满容器
+3. 移除 `Magnifier` 的内联 `style={{ width: '100%', height: 'auto' }}`，
+   改用 `className="stage-image"` 由 CSS 控制
+
+这样切分框的百分比定位也与图片坐标系一致（此前容器比图片高，红框会错位）。
+
+### 顺带修复
+
+- 顶部大片空白：`.practice__body` 的 `justify-content` 由 `center` 改为 `flex-start`
+- 提示气泡长期压住字帖底部：加 `hint-out` 动画，4.5 秒后淡出
+
+### 验证（1080x1440 测试图）
+
+```
+自然比例 0.750 → 显示比例 0.750   ✓ 不变形
+imgFullyVisible: true              ✓ 完整显示
+hintVisible: false                 ✓ 提示已淡出
+红框与文字精确对齐
+```
+
 ## 遗留
 
 - 未用真实手机拍摄的字帖照片验证（合成图偏「干净」），透视/阴影可能影响切分

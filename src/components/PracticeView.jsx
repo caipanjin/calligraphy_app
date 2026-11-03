@@ -736,12 +736,20 @@ const PracticeView = ({
             </button>
           </div>
 
-          <div className="stage-frame" ref={frameRef}>
+          <div
+            className="stage-frame"
+            ref={frameRef}
+            style={
+              naturalSize.width > 0 && naturalSize.height > 0
+                ? { aspectRatio: `${naturalSize.width} / ${naturalSize.height}` }
+                : undefined
+            }
+          >
             <Magnifier
               imageSrc={image}
               largeImageSrc={image}
               imageAlt="字帖"
-              style={{ width: '100%', height: 'auto' }}
+              className="stage-image"
             />
             {savedBoxes && savedBoxes.length > 0 ? (
               <div className="stage-grid">
