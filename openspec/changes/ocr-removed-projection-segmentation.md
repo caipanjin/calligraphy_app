@@ -1102,6 +1102,58 @@ iOS 每次读取剪贴板都会弹「允许粘贴」，这是系统隐私机制�
 卡片缩略图 `object-fit: contain` 的留白底色由 `--surface-2` 改为 `--surface`，
 与卡片背景一致，避免出现突兀色块。
 
+## 第二十九轮：底部缩略图与主视图同步
+
+### 需求
+
+单字临摹页底部的缩略图，要与上方主视图保持一致——
+包括用户对单字做放大/缩小/移动之后的取景。
+
+### 原因
+
+缩略图条（`.char-strip`）原本用每个相邻字**自己的原始框**作为 `viewBox`：
+
+```jsx
+<svg viewBox={`${position.x} ${position.y} ${position.width} ${position.height}`}>
+```
+
+而主视图用的是**用户调整后的** `selectedCharacter.viewBox`。
+两者数据源不同，所以调整后不同步。
+
+### 修正
+
+当前字（`active`）的缩略图改用 `selectedCharacter.viewBox`，
+其余相邻字仍用各自原始框：
+
+```jsx
+viewBox={
+  active && selectedCharacter
+    ? `${viewBox.x} ${viewBox.y} ${viewBox.width} ${viewBox.height}`
+    : `${position.x} ${position.y} ${position.width} ${position.height}`
+}
+```
+
+### 顺带修复：微调面板遮挡缩略图
+
+`dpad` 原本 `position: absolute; bottom: calc(100% + 8px)` 向上弹出，
+正好盖住缩略图条。
+
+改为嵌在工具栏内展开（`position: relative`，`margin: 0 auto 6px`），
+不再遮挡任何内容。
+
+### 验证
+
+| 操作 | 主视图 viewBox | 缩略图 viewBox | 结果 |
+|---|---|---|---|
+| 初始 | 983.6 1189.3 318.5 341.4 | 同左 | 一致 |
+| 放大 3 次 | 1005.3 1212.6 275.1 294.9 | 同左 | 一致 |
+| 移动后 | 1003.3 1212.6 275.1 294.9 | 同左 | 一致 |
+
+### 踩坑记录
+
+修改 `.char-strip` 时误把 `display: flex` 等属性挤到了 CSS 规则外面，
+导致缩略图失去布局约束、被撑得很大。已修复。
+
 ## 遗留
 
 - 未用真实手机拍摄的字帖照片验证（合成图偏「干净」），透视/阴影可能影响切分

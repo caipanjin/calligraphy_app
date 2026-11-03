@@ -869,7 +869,13 @@ const PracticeView = ({
                     aria-label={active ? '当前字' : '跳转到相邻字'}
                   >
                     <svg
-                      viewBox={`${position.x} ${position.y} ${position.width} ${position.height}`}
+                      viewBox={
+                        // 当前字：跟随主视图的 viewBox，保证缩略图与上方完全一致
+                        // （用户放大/缩小/移动时，缩略图同步变化）
+                        active && selectedCharacter
+                          ? `${selectedCharacter.viewBox.x} ${selectedCharacter.viewBox.y} ${selectedCharacter.viewBox.width} ${selectedCharacter.viewBox.height}`
+                          : `${position.x} ${position.y} ${position.width} ${position.height}`
+                      }
                       preserveAspectRatio="xMidYMid meet"
                     >
                       <image

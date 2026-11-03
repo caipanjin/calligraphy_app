@@ -809,11 +809,14 @@ button {
 
 /* 字符滑轨 */
 .char-strip {
+  position: relative;
+  z-index: 1;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
   padding: 12px 12px 6px;
+  transition: opacity 0.18s ease, transform 0.18s ease;
 }
 
 .char-thumb {
@@ -902,18 +905,18 @@ button {
 
 /* 微调方向盘 */
 .dpad {
-  position: absolute;
-  left: 50%;
-  bottom: calc(100% + 8px);
-  transform: translateX(-50%);
+  /* 嵌在工具栏内展开（不绝对定位），避免遮挡上方缩略图条 */
+  position: relative;
+  margin: 0 auto 6px;
+  width: max-content;
   display: grid;
-  grid-template-columns: repeat(3, 44px);
-  grid-template-rows: repeat(3, 44px);
+  grid-template-columns: repeat(3, 40px);
+  grid-template-rows: repeat(3, 40px);
   gap: 2px;
-  padding: 8px;
-  border-radius: 22px;
-  background: var(--surface);
-  box-shadow: var(--shadow-lg);
+  padding: 6px;
+  border-radius: 18px;
+  background: var(--surface-2);
+  box-shadow: var(--shadow-sm);
   animation: pop-in 0.16s ease;
 }
 
