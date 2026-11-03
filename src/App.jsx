@@ -4,6 +4,8 @@ import Library, { MAX_STICKERS } from './components/Library';
 import PracticeView from './components/PracticeView';
 import SegmentSheet from './components/SegmentSheet';
 import ImportSheet from './components/ImportSheet';
+import ClipboardBanner from './components/ClipboardBanner';
+import { detectClipboardImport } from './utils/clipboardDetect';
 import SettingsView from './components/SettingsView';
 import Toast from './components/Toast';
 import { hashImageData } from './utils/imageHash';
@@ -67,6 +69,10 @@ const App = () => {
   const [showImport, setShowImport] = useState(false);
   // 从外部（微信「用其他应用打开」）传入的待导入链接
   const [importUrl, setImportUrl] = useState('');
+  // 剪贴板检测结果：{ kind: 'wechat'|'image'|'url', payload }
+  const [clipboardHint, setClipboardHint] = useState(null);
+  // 已提示过的内容指纹，避免反复打扰
+  const clipboardSeenRef = useRef('');
   // 每张字帖的练习进度：{ [url]: { practiced, total } }
   const [progressMap, setProgressMap] = useState({});
   // 切分结果变更的版本号：切分面板改动后，临摹页据此重新读取已存网格
@@ -101,6 +107,51 @@ const App = () => {
     if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
     toastTimerRef.current = setTimeout(() => setToast(''), TOAST_DURATION);
   }, []);
+
+  /* ---------------- 剪贴板导入提示 ---------------- */
+
+  const checkClipboard = useCallback(async () => {
+    try {
+      const detected = await detectClipboardImport();
+      if (!detected.kind) return;
+
+      // 同一份内容只提示一次，避免反复打扰
+      const fingerprint = `${detected.kind}:${detected.payload.slice(0, 64)}`;
+      if (clipboardSeenRef.current === fingerprint) return;
+      clipboardSeenRef.current = fingerprint;
+
+      setClipboardHint(detected);
+    } catch (error) {
+      // 剪贴板不可用（无权限 / 无手势）时静默跳过
+    }
+  }, []);
+
+  // 进入字帖库（含从设置页切回）时检测一次
+  useEffect(() => {
+    if (mode !== 'library' || tab !== 'library') return undefined;
+    const timer = setTimeout(checkClipboard, 300);
+    return () => clearTimeout(timer);
+  }, [mode, tab, checkClipboard]);
+
+  // App 从后台回到前台时再检测（用户可能刚去微信复制了链接）
+  useEffect(() => {
+    let listener = null;
+    const register = async () => {
+      try {
+        listener = await CapApp.addListener('appStateChange', (state) => {
+          if (state && state.isActive) {
+            setTimeout(checkClipboard, 400);
+          }
+        });
+      } catch (error) {
+        // Web 环境无该事件
+      }
+    };
+    register();
+    return () => {
+      if (listener && listener.remove) listener.remove();
+    };
+  }, [checkClipboard]);
 
   /* ---------------- 接收外部分享的链接 ---------------- */
 
@@ -387,6 +438,32 @@ const App = () => {
     [persistCurrent, showToast, updateRecent]
   );
 
+  // 处理剪贴板导入：链接 → 打开导入面板；图片 → 直接存为字帖
+  const handleClipboardImport = useCallback(async () => {
+    if (!clipboardHint) return;
+    const { kind, payload } = clipboardHint;
+
+    if (kind === 'wechat' || kind === 'url') {
+      setImportUrl(payload);
+      setShowImport(true);
+      setClipboardHint(null);
+      return;
+    }
+
+    if (kind === 'image') {
+      // 图片是 data URL，直接走和文件上传一样的入库流程
+      const entry = { url: payload, addedAt: Date.now(), size: estimateDataUrlSize(payload) };
+      const next = promoteRecent(recentRef.current, entry);
+      updateRecent(next);
+      setImage(payload);
+      setSelectedCharacter(null);
+      setMode('practice');
+      persistCurrent(payload);
+      setClipboardHint(null);
+      showToast('已从剪贴板导入字帖');
+    }
+  }, [clipboardHint, persistCurrent, showToast, updateRecent]);
+
   const handlePickFiles = useCallback(() => {
     if (fileInputRef.current) fileInputRef.current.click();
   }, []);
@@ -553,15 +630,25 @@ const App = () => {
                 }}
               />
             ) : (
-              <Library
+              <>
+                {clipboardHint && (
+                  <ClipboardBanner
+                    kind={clipboardHint.kind}
+                    onImport={handleClipboardImport}
+                    onDismiss={() => setClipboardHint(null)}
+                  />
+                )}
+
+                <Library
                 images={recentImages}
                 currentImage={image}
                 onOpen={handleOpenSticker}
                 onRequestDelete={setDeleteIndex}
                 onPickFiles={handlePickFiles}
-                progressMap={progressMap}
-                onImport={() => setShowImport(true)}
-              />
+                  progressMap={progressMap}
+                  onImport={() => setShowImport(true)}
+                />
+              </>
             )}
           </main>
 

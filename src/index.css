@@ -301,8 +301,10 @@ button {
 .poster-card__media img {
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  /* 用 contain 完整显示字帖，避免长图被裁掉上下内容 */
+  object-fit: contain;
   display: block;
+  background: var(--surface-2);
 }
 
 .poster-card--current .poster-card__media {
@@ -1199,6 +1201,82 @@ button {
   height: 34px;
   color: var(--accent);
   opacity: 0.8;
+}
+
+/* ---------------- 剪贴板导入提示 ---------------- */
+
+.clip-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 12px 10px;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  animation: clip-in 0.28s ease both;
+}
+
+@keyframes clip-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.clip-banner__icon {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.clip-banner__text {
+  flex: 1;
+  min-width: 0;
+  font-size: 12.5px;
+  color: var(--ink-2);
+  letter-spacing: 0.02em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.clip-banner__action {
+  flex-shrink: 0;
+  padding: 6px 12px;
+  border: none;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-family: inherit;
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.clip-banner__action:active {
+  opacity: 0.85;
+}
+
+.clip-banner__close {
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--ink-3);
 }
 
 /* ---------------- 从公众号导入 ---------------- */
