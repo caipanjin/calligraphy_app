@@ -1515,6 +1515,73 @@ D) 点重新切分    显示 1221（=216）        ← 恢复自动结果
 `scripts/test-segment.mjs` 新增 1 项（返回值必须含原图尺寸的静态校验），
 共 34 项；npm test 共 93 项。
 
+## 第三十六轮：修复 iOS 启动白屏（objectStore is not a function）
+
+### 现象
+
+Xcode 控制台：
+
+```
+------ STARTUP JS ERROR ------
+TypeError: o.objectStore is not a function
+(In 'o.objectStore(Mt)', 'o.objectStore' is undefined)
+URL: capacitor://localhost/assets/index-*.js
+See above for help with debugging blank-screen issues
+```
+
+**App 启动即白屏。**
+
+### 根因
+
+`src/utils/practiceStore.js` 的 `deleteImagePractice`：
+
+```js
+const write = withStore(db, PRACTICE_STORE, 'readwrite', (store) => store);
+const store = write.objectStore(PRACTICE_STORE);   // ← write 已经是 store
+```
+
+`withStore` 的返回值是**回调的返回值**，这里回调返回 `store`，
+所以 `write` 是 store 而不是 db/transaction，`store.objectStore(...)` 不存在 → 抛错。
+
+这与之前 `writeSegmentation` 踩的是同一类坑（把 store 当成 transaction/db）。
+
+### 为什么会导致白屏
+
+`db.onupgradeneeded` → 建表成功 → 后续初始化流程触发了该函数，
+未捕获异常中断了 React 渲染，整个应用空白。
+
+### 修正
+
+直接在 `withStore` 回调里完成删除，并返回 transaction 以监听完成事件：
+
+```js
+const tx = withStore(db, PRACTICE_STORE, 'readwrite', (store, transaction) => {
+  keys.forEach((key) => store.delete(key));
+  return transaction;
+});
+tx.oncomplete = () => resolve(true);
+```
+
+### 同类问题排查
+
+已审计 `segmentCache.js` 与 `practiceStore.js` 全部 `withStore` 调用：
+
+- 返回 request（`store.get` / `store.getAll` / `store.delete`）→ 正常使用 `onsuccess`
+- 返回 store 后**又调用 `.objectStore()`** → 仅此一处，已修复
+- `deleteSegmentationByPrefix` / `clearSegmentations` 直接用 `db.transaction()` → 正常
+
+### 验证
+
+```
+1) App 挂载           ✓
+2) 库就绪             ✓
+3) 启动异常           无
+4) deleteImagePractice 正常返回 true
+5) 完整流程：上传 → 进临摹页 → 返回(1 张) → 删除 → 0 张，全程无异常
+```
+
+npm test 共 93 项。
+
 ## 遗留
 
 - 未用真实手机拍摄的字帖照片验证（合成图偏「干净」），透视/阴影可能影响切分

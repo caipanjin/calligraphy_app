@@ -182,16 +182,19 @@ export const deleteImagePractice = (db, imageHash) =>
         resolve(true);
         return;
       }
-      const write = withStore(db, PRACTICE_STORE, 'readwrite', (store) => store);
-      if (!write) {
+      // 注意：withStore 的回调拿到的是 store（不是 db/transaction），
+      // 所以这里直接在回调里删除，并返回 transaction 以监听完成事件。
+      const tx = withStore(db, PRACTICE_STORE, 'readwrite', (store, transaction) => {
+        keys.forEach((key) => store.delete(key));
+        return transaction;
+      });
+      if (!tx) {
         resolve(false);
         return;
       }
-      const store = write.objectStore(PRACTICE_STORE);
-      keys.forEach((key) => store.delete(key));
-      write.oncomplete = () => resolve(true);
-      write.onerror = () => resolve(false);
-      write.onabort = () => resolve(false);
+      tx.oncomplete = () => resolve(true);
+      tx.onerror = () => resolve(false);
+      tx.onabort = () => resolve(false);
     };
     request.onerror = () => resolve(false);
   });
