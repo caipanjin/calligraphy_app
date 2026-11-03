@@ -73,6 +73,7 @@ const App = () => {
   const [clipboardHint, setClipboardHint] = useState(null);
   // 已提示过的内容指纹，避免反复打扰
   const clipboardSeenRef = useRef('');
+  const clipboardLastReadRef = useRef(0);
   // 每张字帖的练习进度：{ [url]: { practiced, total } }
   const [progressMap, setProgressMap] = useState({});
   // 切分结果变更的版本号：切分面板改动后，临摹页据此重新读取已存网格
@@ -80,6 +81,14 @@ const App = () => {
   const [deleteIndex, setDeleteIndex] = useState(null);
   const [toast, setToast] = useState('');
   // 打开字帖时是否跳到上次练到的字（默认开启）
+  // 打开 App 时是否自动检测剪贴板（iOS 每次读取会弹系统授权，可关闭）
+  const [clipboardWatch, setClipboardWatch] = useState(() => {
+    try {
+      return localStorage.getItem('calligraphy:clipwatch') !== 'off';
+    } catch (error) {
+      return true;
+    }
+  });
   const [resumePractice, setResumePractice] = useState(() => {
     try {
       return localStorage.getItem('calligraphy:resume') !== 'off';
@@ -111,6 +120,12 @@ const App = () => {
   /* ---------------- 剪贴板导入提示 ---------------- */
 
   const checkClipboard = useCallback(async () => {
+    if (!clipboardWatch) return;
+    // 节流：iOS 每次读取剪贴板都会弹系统授权，避免短时间反复触发
+    const now = Date.now();
+    if (now - clipboardLastReadRef.current < 8000) return;
+    clipboardLastReadRef.current = now;
+
     try {
       const detected = await detectClipboardImport();
       if (!detected.kind) return;
@@ -124,7 +139,7 @@ const App = () => {
     } catch (error) {
       // 剪贴板不可用（无权限 / 无手势）时静默跳过
     }
-  }, []);
+  }, [clipboardWatch]);
 
   // 进入字帖库（含从设置页切回）时检测一次
   useEffect(() => {
@@ -623,6 +638,12 @@ const App = () => {
                 maxStickers={MAX_STICKERS}
                 onClearAll={handleClearAll}
                 db={db}
+                clipboardWatch={clipboardWatch}
+                onChangeClipboardWatch={(value) => {
+                  setClipboardWatch(value);
+                  try { localStorage.setItem('calligraphy:clipwatch', value ? 'on' : 'off'); } catch (error) { /* 忽略 */ }
+                  if (!value) setClipboardHint(null);
+                }}
                 resumePractice={resumePractice}
                 onChangeResume={(value) => {
                   setResumePractice(value);

@@ -17,6 +17,8 @@ const SettingsView = ({
   onClearAll,
   resumePractice = true,
   onChangeResume,
+  clipboardWatch = true,
+  onChangeClipboardWatch,
   db
 }) => {
   const [stats, setStats] = useState({ today: 0, week: 0, total: 0 });
@@ -56,6 +58,23 @@ const SettingsView = ({
       <div className="settings-group">
         <h2 className="settings-group__title">练习</h2>
         <div className="settings-card">
+          <div className="settings-row">
+            <span className="settings-row__label">自动检测剪贴板</span>
+            <div className="settings-segmented">
+              <button
+                className={clipboardWatch ? 'is-active' : ''}
+                onClick={() => onChangeClipboardWatch && onChangeClipboardWatch(true)}
+              >
+                开
+              </button>
+              <button
+                className={!clipboardWatch ? 'is-active' : ''}
+                onClick={() => onChangeClipboardWatch && onChangeClipboardWatch(false)}
+              >
+                关
+              </button>
+            </div>
+          </div>
           <div className="settings-row">
             <span className="settings-row__label">打开字帖时继续上次</span>
             <div className="settings-segmented">

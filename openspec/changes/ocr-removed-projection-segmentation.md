@@ -1017,6 +1017,52 @@ npm test 共 82 项。四类场景分类验证：`wechat, image, url, none` 全�
 iOS 部署目标仍为 13.0（`@capacitor/app` 与 `clipboard` 均为 6.x）。
 用户当前使用 iOS 26，如需更高版本 API 可随时提升，目前无必要。
 
+## 第二十七轮：修正剪贴板图片检测（读错字段）
+
+### 问题
+
+- 复制公众号链接：正常 ✓
+- 复制图片：**有系统授权弹窗，但页面无提示、也不导入** ✗
+- 复制纯文字：有系统授权弹窗，无提示
+
+### 根因
+
+`@capacitor/clipboard` 的 `ReadResult` 只有 `{ value, type }` **两个字段，没有 `image`**。
+
+iOS 原生实现（`Clipboard.swift`）：
+
+```swift
+图片 → { value: "data:image/png;base64,...", type: "image/png" }
+文本 → { value: "文本内容", type: "text/plain" }
+```
+
+我原来读 `result.image`（永远 undefined），所以图片分支永不生效。
+
+### 修正
+
+抽出纯函数 `parseClipboardResult(result)`：
+
+- `type` 以 `image/` 开头，或 `value` 以 `data:image/` 开头 → 判定为图片
+- 图片的 data URL 从 `value` 取；若 `value` 是裸 base64 则拼成 data URL
+- 否则按文本处理
+
+### 关于系统授权弹窗
+
+iOS 每次读取剪贴板都会弹「允许粘贴」，这是系统隐私机制，无法绕过。
+
+应对：
+1. **加 8 秒节流**，避免短时间反复触发
+2. **设置页新增「自动检测剪贴板」开关**（默认开）——不想被弹窗打扰可关闭，
+   改为手动点「从公众号导入」粘贴
+3. 用户可在 iOS 设置 → 应用 → 从其他 App 粘贴 → 改为「允许」，之后不再弹
+
+纯文字不显示提示条是**预期行为**（不可导入），不是 bug。
+
+### 测试
+
+新增 5 项 `parseClipboardResult` 测试（图片 data URL / 裸 base64 / 文本 / 空值），
+`scripts/test-clipboard.mjs` 共 12 项，npm test 共 87 项。
+
 ## 遗留
 
 - 未用真实手机拍摄的字帖照片验证（合成图偏「干净」），透视/阴影可能影响切分

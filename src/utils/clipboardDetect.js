@@ -36,6 +36,32 @@ export const findAnyUrl = (text) => {
 };
 
 /**
+ * 解析 @capacitor/clipboard 的 ReadResult（纯函数，便于测试）
+ *
+ * iOS 原生返回结构（见 Clipboard.swift）：
+ *   图片 → { value: 'data:image/png;base64,...', type: 'image/png' }
+ *   文本 → { value: '文本内容', type: 'text/plain' }
+ * 注意 ReadResult 没有 image 字段，图片是放在 value 里的 data URL。
+ */
+export const parseClipboardResult = (result) => {
+  const empty = { text: '', imageDataUrl: '', imageMime: '' };
+  if (!result) return empty;
+
+  const value = result.value == null ? '' : String(result.value);
+  const type = result.type == null ? '' : String(result.type);
+
+  const isImage = type.startsWith('image/') || value.startsWith('data:image/');
+  if (isImage) {
+    const dataUrl = value.startsWith('data:')
+      ? value
+      : `data:${type || 'image/png'};base64,${value}`;
+    return { text: '', imageDataUrl: dataUrl, imageMime: type || 'image/png' };
+  }
+
+  return { text: value, imageDataUrl: '', imageMime: '' };
+};
+
+/**
  * 读取剪贴板
  * @returns {{ text: string, imageDataUrl: string, imageMime: string }}
  */
@@ -44,12 +70,7 @@ export const readClipboard = async () => {
 
   if (isNative()) {
     try {
-      const result = await Clipboard.read();
-      return {
-        text: result.value || '',
-        imageDataUrl: result.image ? `data:${result.type || 'image/png'};base64,${result.image}` : '',
-        imageMime: result.type || ''
-      };
+      return parseClipboardResult(await Clipboard.read());
     } catch (error) {
       return empty;
     }
