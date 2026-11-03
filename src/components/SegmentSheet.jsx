@@ -50,6 +50,8 @@ const SegmentSheet = ({ image, db, onSelectCharacter, onClose }) => {
   const [draftRect, setDraftRect] = useState(null); // 百分比坐标 {left, top, width, height}
   const draftStartRef = useRef(null);
   const previewRef = useRef(null);
+  // 刚完成拖拽时抑制随后的 click（避免一次拖拽触发两次加框）
+  const justDraggedRef = useRef(false);
   const [practicedCount, setPracticedCount] = useState(0);
 
   // 先恢复这张字帖上次的版面设置与「是否带格子线」
@@ -333,6 +335,76 @@ const SegmentSheet = ({ image, db, onSelectCharacter, onClose }) => {
 
     setDraftRect(null);
     setDrawing(false);
+    justDraggedRef.current = true;
+    clearPracticeForImage();
+    applyBoxes(addBox(boxes, box, true));
+  };
+
+  /**
+   * 根据点击位置推断一个「默认大小」的框
+   *
+   * 优先参考**同列最近的字**的宽高（竖排字帖里同列字大小最接近）；
+   * 没有同列邻居时退回到全部框的中位数。
+   */
+  const inferDefaultBox = (percentPoint) => {
+    if (!boxes || boxes.length === 0 || !imageSize.width) return null;
+
+    const clickX = percentPoint.x * imageSize.width;
+    const clickY = percentPoint.y * imageSize.height;
+
+    // 找同列（中心 x 距离在一列宽内）且 y 最近的框
+    let nearest = null;
+    let nearestDist = Infinity;
+    for (const box of boxes) {
+      const centerX = box.x + box.width / 2;
+      const sameColumn = Math.abs(centerX - clickX) <= Math.max(box.width * 0.6, 20);
+      if (!sameColumn) continue;
+      const centerY = box.y + box.height / 2;
+      const dist = Math.abs(centerY - clickY);
+      if (dist < nearestDist) {
+        nearestDist = dist;
+        nearest = box;
+      }
+    }
+
+    // 没有同列邻居：用所有框的中位数尺寸
+    let width;
+    let height;
+    if (nearest) {
+      width = nearest.width;
+      height = nearest.height;
+    } else {
+      const widths = boxes.map((b) => b.width).sort((a, b) => a - b);
+      const heights = boxes.map((b) => b.height).sort((a, b) => a - b);
+      width = widths[Math.floor(widths.length / 2)];
+      height = heights[Math.floor(heights.length / 2)];
+    }
+
+    // 以点击点为中心放置，并限制在图片范围内
+    const x = Math.min(Math.max(0, clickX - width / 2), imageSize.width - width);
+    const y = Math.min(Math.max(0, clickY - height / 2), imageSize.height - height);
+
+    return {
+      x: Math.round(x),
+      y: Math.round(y),
+      width: Math.round(width),
+      height: Math.round(height)
+    };
+  };
+
+  // 画框模式下单击（未拖动）→ 生成默认大小的框
+  const handlePreviewClick = (event) => {
+    if (!drawing) return;
+    // 如果刚完成一次拖拽，忽略这次 click
+    if (justDraggedRef.current) {
+      justDraggedRef.current = false;
+      return;
+    }
+    const point = pointToPercent(event);
+    if (!point) return;
+    const box = inferDefaultBox(point);
+    if (!box) return;
+    setDrawing(false);
     clearPracticeForImage();
     applyBoxes(addBox(boxes, box, true));
   };
@@ -472,9 +544,11 @@ const SegmentSheet = ({ image, db, onSelectCharacter, onClose }) => {
 
           {status === 'done' && editing && (
             <div className="seg-edit-hint">
-              {selectedIndex === null
-                ? '点击任意框选中，再选择下方操作'
-                : `已选中第 ${selectedIndex + 1} 个框`}
+              {drawing
+                ? '在图片上单击生成一个默认大小的框，或拖拽画出指定大小'
+                : selectedIndex === null
+                  ? '点击任意框选中，再选择下方操作'
+                  : `已选中第 ${selectedIndex + 1} 个框`}
             </div>
           )}
 
@@ -489,6 +563,7 @@ const SegmentSheet = ({ image, db, onSelectCharacter, onClose }) => {
               onTouchStart={handleDrawStart}
               onTouchMove={handleDrawMove}
               onTouchEnd={handleDrawEnd}
+              onClick={handlePreviewClick}
             >
               <img src={image} alt="切分结果" draggable={false} />
               {boxes.map((box, index) => (
