@@ -1106,12 +1106,35 @@ export const segmentCharacters = async (imageSrc, options = {}) => {
   let usable = boxes.filter((box) => box.width <= maxW && box.height <= maxH && box.width > 4 && box.height > 4);
 
   // 过滤碎片：明显小于中位字块的（通常是贴边被截断的半行或噪点）
+  //
+  // 关键：不能只看高度。笔画简单的字（如「一」）墨迹高度天然只有正常字的
+  // 1/4 左右，但它的**宽度是正常的**。真正的碎片（贴边截断的半行、噪点）
+  // 通常宽高都明显偏小。
+  // 因此：高度偏小但宽度正常的，判定为「笔画简单的字」并保留。
   if (usable.length >= 5) {
     const medianW = median(usable.map((box) => box.width));
     const medianH = median(usable.map((box) => box.height));
-    usable = usable.filter(
-      (box) => box.width >= medianW * 0.35 && box.height >= medianH * 0.45
-    );
+    // 图片尺寸（原图坐标），用于判断「贴边」
+    const imageW = W / scale;
+    const imageH = H / scale;
+    const edgeMargin = medianH * 0.15;
+
+    usable = usable.filter((box) => {
+      if (box.width < medianW * 0.35) return false;        // 太窄：碎片/噪点
+      if (box.height >= medianH * 0.45) return true;       // 高度正常：保留
+
+      // 高度偏小：只有「宽度接近正常字宽」才是笔画简单的字（如「一」）。
+      if (box.width < medianW * 0.6) return false;
+
+      // 但贴着图片上下边缘的矮块仍是残块（页面被截断的半行）。
+      // 实测：密集字帖底部常出现 宽比 1.0、高比 0.27 的贴边残块，
+      // 只按宽度判断会把它误当成「一」。
+      const touchesTop = box.y <= edgeMargin;
+      const touchesBottom = box.y + box.height >= imageH - edgeMargin;
+      if (touchesTop || touchesBottom) return false;
+
+      return true;
+    });
   }
 
   // 字距估计 + 退化检测：

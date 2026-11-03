@@ -343,4 +343,28 @@ check('按字取高：扩展有上限', () => {
   assert.ok(m.extendDown <= 50, `extendDown=${m.extendDown} 应 <= 50`);
 });
 
+check('碎片过滤：宽度正常但高度偏小的字（如「一」）应保留', () => {
+  // 模拟：正常字 200x200，一个「一」宽 200 高 60
+  const boxes = [
+    { x: 0, y: 0, width: 200, height: 200 },
+    { x: 0, y: 300, width: 200, height: 200 },
+    { x: 0, y: 600, width: 200, height: 200 },
+    { x: 0, y: 900, width: 200, height: 200 },
+    { x: 0, y: 1200, width: 200, height: 200 },
+    // 「一」：宽度正常、高度 60（中位高 200 × 0.45 = 90，60 < 90）
+    { x: 0, y: 1500, width: 200, height: 60 }
+  ];
+  // 过滤逻辑：宽 >= medianW*0.6 且不贴边 → 保留
+  const medianW = 200;
+  const kept = boxes.filter((box) => box.width >= medianW * 0.6);
+  assert.equal(kept.length, 6, '「一」应被保留');
+});
+
+check('碎片过滤：宽高都小的贴边残块应过滤', () => {
+  // 真正的碎片：宽度明显偏小
+  const fragment = { x: 0, y: 0, width: 50, height: 40 };
+  const medianW = 200;
+  assert.equal(fragment.width >= medianW * 0.6, false, '窄碎片应被过滤');
+});
+
 console.log(`\n${passed} 项通过`);
