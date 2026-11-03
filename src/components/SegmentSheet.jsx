@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   FaTimes,
   FaRedo,
@@ -8,7 +8,8 @@ import {
   FaCompress,
   FaCut,
   FaPen,
-  FaCheck
+  FaCheck,
+  FaPlus
 } from 'react-icons/fa';
 import { segmentCharacters } from '../utils/segment';
 import { hashImageData } from '../utils/imageHash';
@@ -19,7 +20,7 @@ import {
   readSettings,
   writeSettings
 } from '../utils/segmentCache';
-import { removeBox, mergeBoxes, splitBox, findNearestBoxIndex } from '../utils/boxEdit';
+import { removeBox, mergeBoxes, splitBox, findNearestBoxIndex, addBox } from '../utils/boxEdit';
 import { deleteImagePractice, readImagePractice } from '../utils/practiceStore';
 
 // 字帖一律竖排，不再提供版面切换
@@ -44,6 +45,11 @@ const SegmentSheet = ({ image, db, onSelectCharacter, onClose }) => {
   const [editedBoxes, setEditedBoxes] = useState(null);
   // 破坏性操作前的确认（会重置练习记录）
   const [pendingAction, setPendingAction] = useState(null);
+  // 画框模式：用户在图上拖拽出一个新框（补切分漏掉的字）
+  const [drawing, setDrawing] = useState(false);
+  const [draftRect, setDraftRect] = useState(null); // 百分比坐标 {left, top, width, height}
+  const draftStartRef = useRef(null);
+  const previewRef = useRef(null);
   const [practicedCount, setPracticedCount] = useState(0);
 
   // 先恢复这张字帖上次的版面设置与「是否带格子线」
@@ -243,6 +249,94 @@ const SegmentSheet = ({ image, db, onSelectCharacter, onClose }) => {
   const manualKey = baseKey ? `${baseKey}:manual` : '';
 
   // 编辑结果立即持久化：下次打开直接复用
+  /* ---------------- 画框（补漏切的字） ---------------- */
+
+  const startDraw = () => {
+    setDrawing(true);
+    setSelectedIndex(null);
+    setDraftRect(null);
+    draftStartRef.current = null;
+  };
+
+  const cancelDraw = () => {
+    setDrawing(false);
+    setDraftRect(null);
+    draftStartRef.current = null;
+  };
+
+  // 把鼠标/触摸位置换算成图片百分比坐标
+  const pointToPercent = (event) => {
+    const node = previewRef.current;
+    if (!node) return null;
+    const rect = node.getBoundingClientRect();
+    if (!rect.width || !rect.height) return null;
+    const clientX = event.touches ? event.touches[0].clientX : event.clientX;
+    const clientY = event.touches ? event.touches[0].clientY : event.clientY;
+    return {
+      x: Math.min(1, Math.max(0, (clientX - rect.left) / rect.width)),
+      y: Math.min(1, Math.max(0, (clientY - rect.top) / rect.height))
+    };
+  };
+
+  const handleDrawStart = (event) => {
+    if (!drawing) return;
+    event.preventDefault();
+    const point = pointToPercent(event);
+    if (!point) return;
+    draftStartRef.current = point;
+    setDraftRect({ left: point.x, top: point.y, width: 0, height: 0 });
+  };
+
+  const handleDrawMove = (event) => {
+    if (!drawing || !draftStartRef.current) return;
+    event.preventDefault();
+    const point = pointToPercent(event);
+    if (!point) return;
+    const start = draftStartRef.current;
+    setDraftRect({
+      left: Math.min(start.x, point.x),
+      top: Math.min(start.y, point.y),
+      width: Math.abs(point.x - start.x),
+      height: Math.abs(point.y - start.y)
+    });
+  };
+
+  const handleDrawEnd = (event) => {
+    if (!drawing || !draftStartRef.current) return;
+    event.preventDefault();
+    const point = pointToPercent(event);
+    const start = draftStartRef.current;
+    draftStartRef.current = null;
+
+    if (!point) {
+      setDraftRect(null);
+      return;
+    }
+
+    const left = Math.min(start.x, point.x);
+    const top = Math.min(start.y, point.y);
+    const width = Math.abs(point.x - start.x);
+    const height = Math.abs(point.y - start.y);
+
+    // 太小的拖动视为误触，忽略
+    if (width < 0.02 || height < 0.02) {
+      setDraftRect(null);
+      return;
+    }
+
+    const box = {
+      x: Math.round(left * imageSize.width),
+      y: Math.round(top * imageSize.height),
+      width: Math.round(width * imageSize.width),
+      height: Math.round(height * imageSize.height)
+    };
+
+    setDraftRect(null);
+    setDrawing(false);
+    clearPracticeForImage();
+    applyBoxes(addBox(boxes, box, true));
+  };
+
   const applyBoxes = (next) => {
     setEditedBoxes(next);
     setSelectedIndex(null);
@@ -385,8 +479,18 @@ const SegmentSheet = ({ image, db, onSelectCharacter, onClose }) => {
           )}
 
           {status === 'done' && (
-            <div className="seg-preview">
-              <img src={image} alt="切分结果" />
+            <div
+              className={`seg-preview${drawing ? ' seg-preview--drawing' : ''}`}
+              ref={previewRef}
+              onMouseDown={handleDrawStart}
+              onMouseMove={handleDrawMove}
+              onMouseUp={handleDrawEnd}
+              onMouseLeave={handleDrawEnd}
+              onTouchStart={handleDrawStart}
+              onTouchMove={handleDrawMove}
+              onTouchEnd={handleDrawEnd}
+            >
+              <img src={image} alt="切分结果" draggable={false} />
               {boxes.map((box, index) => (
                 <button
                   key={`${index}-${Math.round(box.x)}-${Math.round(box.y)}`}
@@ -403,6 +507,17 @@ const SegmentSheet = ({ image, db, onSelectCharacter, onClose }) => {
                   aria-label={`第 ${index + 1} 个字`}
                 />
               ))}
+              {draftRect && (
+                <span
+                  className="seg-draft"
+                  style={{
+                    left: `${draftRect.left * 100}%`,
+                    top: `${draftRect.top * 100}%`,
+                    width: `${draftRect.width * 100}%`,
+                    height: `${draftRect.height * 100}%`
+                  }}
+                />
+              )}
             </div>
           )}
         </div>
@@ -421,6 +536,16 @@ const SegmentSheet = ({ image, db, onSelectCharacter, onClose }) => {
               <FaCut size={13} />
               拆分
             </button>
+            {drawing ? (
+              <button className="btn btn--text" onClick={cancelDraw}>
+                取消加框
+              </button>
+            ) : (
+              <button className="btn btn--ghost" onClick={startDraw}>
+                <FaPlus size={13} />
+                加框
+              </button>
+            )}
             {editedBoxes && (
               <button className="btn btn--text" onClick={handleResetEdit}>
                 还原

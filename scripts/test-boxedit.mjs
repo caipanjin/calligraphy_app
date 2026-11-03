@@ -1,6 +1,6 @@
 /** 切分框编辑操作的单元测试 */
 import assert from 'node:assert/strict';
-import { removeBox, mergeBoxes, splitBox, findNearestBoxIndex } from '../src/utils/boxEdit.js';
+import { removeBox, mergeBoxes, splitBox, findNearestBoxIndex, addBox } from '../src/utils/boxEdit.js';
 
 let passed = 0;
 const check = (name, fn) => {
@@ -62,6 +62,34 @@ check('查找最近邻框：优先上下相邻', () => {
 
 check('只有一个框时无最近邻', () => {
   assert.equal(findNearestBoxIndex([boxes[0]], 0), -1);
+});
+
+check('加框：同列内按 y 顺序插入', () => {
+  const boxes = [
+    { x: 100, y: 100, width: 200, height: 200 },
+    { x: 100, y: 400, width: 200, height: 200 }
+  ];
+  const out = addBox(boxes, { x: 100, y: 250, width: 200, height: 120 }, true);
+  assert.equal(out.length, 3);
+  assert.deepEqual(out.map((b) => b.y), [100, 250, 400]);
+});
+
+check('加框：不同列时按 x 从右到左', () => {
+  const boxes = [
+    { x: 100, y: 100, width: 200, height: 200 },
+    { x: 400, y: 100, width: 200, height: 200 }
+  ];
+  // 在最左列加一个（x=100 列，y 在中间）
+  const out = addBox(boxes, { x: 100, y: 350, width: 200, height: 120 }, true);
+  // 右列（x=400）应排第一
+  assert.equal(out[0].x, 400);
+});
+
+check('加框：不修改原数组', () => {
+  const boxes = [{ x: 100, y: 100, width: 200, height: 200 }];
+  const before = JSON.stringify(boxes);
+  addBox(boxes, { x: 100, y: 400, width: 200, height: 200 }, true);
+  assert.equal(JSON.stringify(boxes), before);
 });
 
 console.log(`\n${passed} 项通过`);

@@ -1171,6 +1171,27 @@ button {
 }
 
 /* 每个单字的可点区域 */
+/* 画框模式：十字光标 + 禁止图片拖拽 */
+.seg-preview--drawing {
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.seg-preview--drawing img {
+  pointer-events: none;
+  user-select: none;
+}
+
+/* 拖拽中的草稿矩形 */
+.seg-draft {
+  position: absolute;
+  border: 2px dashed var(--accent);
+  border-radius: 4px;
+  background: rgba(180, 69, 47, 0.12);
+  pointer-events: none;
+  z-index: 3;
+}
+
 .seg-box {
   position: absolute;
   border: 1.5px solid var(--accent);

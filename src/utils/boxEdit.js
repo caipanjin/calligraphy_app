@@ -39,6 +39,43 @@ export const mergeBoxes = (boxes, indexA, indexB) => {
  * 找到与某个框最邻近的框（按中心距离）
  * 用于「与相邻框合并」
  */
+/**
+ * 在指定位置新增一个框（用于补切分漏掉的字）
+ *
+ * 会按阅读顺序插入到合适的位置，避免新框排到末尾导致「下一字」跳转错乱。
+ * 竖排规则：列从右到左（x 大的在前），列内从上到下（y 小的在前）。
+ *
+ * @param {Array} boxes 现有框
+ * @param {{x,y,width,height}} box 新框（原图坐标）
+ * @param {boolean} vertical 是否竖排（本项目恒为 true）
+ */
+export const addBox = (boxes, box, vertical = true) => {
+  const next = [...boxes, box];
+
+  next.sort((a, b) => {
+    if (vertical) {
+      // 同一列判定：中心 x 差距小于半列宽
+      const aCenter = a.x + a.width / 2;
+      const bCenter = b.x + b.width / 2;
+      const tolerance = Math.max(a.width, b.width) * 0.5;
+      if (Math.abs(aCenter - bCenter) > tolerance) {
+        // 列不同：x 大的（右边）先读
+        return bCenter - aCenter;
+      }
+      // 同列：y 小的（上方）先读
+      return a.y - b.y;
+    }
+    // 横排：y 小的先读，同行内 x 小的先读
+    const aCenterY = a.y + a.height / 2;
+    const bCenterY = b.y + b.height / 2;
+    const tolerance = Math.max(a.height, b.height) * 0.5;
+    if (Math.abs(aCenterY - bCenterY) > tolerance) return aCenterY - bCenterY;
+    return a.x - b.x;
+  });
+
+  return next;
+};
+
 export const findNearestBoxIndex = (boxes, index) => {
   if (index < 0 || index >= boxes.length || boxes.length < 2) return -1;
   const target = boxes[index];
