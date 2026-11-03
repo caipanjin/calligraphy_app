@@ -390,6 +390,17 @@ const App = () => {
         return;
       }
 
+      // 已满时明确提示，避免静默挤掉最旧的字帖
+      const remaining = MAX_STICKERS - recentRef.current.length;
+      if (remaining <= 0) {
+        showToast(`最多保留 ${MAX_STICKERS} 张字帖，请先删除一张再上传`);
+        return;
+      }
+      if (files.length > remaining) {
+        showToast(`还能添加 ${remaining} 张（上限 ${MAX_STICKERS} 张）`);
+        return;
+      }
+
       const valid = files.filter((file) => SUPPORTED_TYPES.includes(file.type));
       if (valid.length === 0) {
         showToast('请选择 JPG / PNG / GIF / WebP 图片');
@@ -541,31 +552,36 @@ const App = () => {
     if (!db) return;
     const items = recentRef.current || [];
     const next = {};
+    const variants = ['vertical:free', 'vertical:grid', 'auto:free', 'auto:grid'];
 
-    for (const item of items) {
-      const imageHash = hashImageData(item.url);
-      // 总字数：从切分缓存里取（优先 manual，其次任意版面）
-      let total = 0;
-      const manualKeys = ['vertical:free', 'vertical:grid', 'auto:free', 'auto:grid'];
-      for (const variant of manualKeys) {
-        const manual = await readSegmentation(db, `${imageHash}:${variant}:manual`);
-        if (manual && manual.boxes && manual.boxes.length > 0) {
-          total = manual.boxes.length;
-          break;
-        }
-      }
-      if (!total) {
-        for (const variant of manualKeys) {
-          const auto = await readSegmentation(db, `${imageHash}:${variant}`);
-          if (auto && auto.boxes && auto.boxes.length > 0) {
-            total = auto.boxes.length;
+    // 每张字帖并行处理：上限提到 20 后，串行会累积上百次 IndexedDB 往返
+    await Promise.all(
+      items.map(async (item) => {
+        const imageHash = hashImageData(item.url);
+
+        // 优先取手动调整结果，其次任意版面的自动结果
+        let total = 0;
+        for (const variant of variants) {
+          const manual = await readSegmentation(db, `${imageHash}:${variant}:manual`);
+          if (manual && manual.boxes && manual.boxes.length > 0) {
+            total = manual.boxes.length;
             break;
           }
         }
-      }
-      const records = await readImagePractice(db, imageHash);
-      next[item.url] = { practiced: countPracticed(records), total };
-    }
+        if (!total) {
+          for (const variant of variants) {
+            const auto = await readSegmentation(db, `${imageHash}:${variant}`);
+            if (auto && auto.boxes && auto.boxes.length > 0) {
+              total = auto.boxes.length;
+              break;
+            }
+          }
+        }
+
+        const records = await readImagePractice(db, imageHash);
+        next[item.url] = { practiced: countPracticed(records), total };
+      })
+    );
 
     setProgressMap(next);
   }, [db]);

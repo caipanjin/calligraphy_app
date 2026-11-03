@@ -2,7 +2,7 @@ import React from 'react';
 import { FaPlus, FaEllipsisH, FaFeatherAlt, FaImages, FaLink } from 'react-icons/fa';
 
 /** 最近图片列表上限 */
-export const MAX_STICKERS = 5;
+export const MAX_STICKERS = 20;
 
 const formatDate = (timestamp) => {
   if (!timestamp) return '';

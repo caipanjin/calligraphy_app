@@ -301,10 +301,11 @@ button {
 .poster-card__media img {
   width: 100%;
   height: 100%;
-  /* 用 contain 完整显示字帖，避免长图被裁掉上下内容 */
+  /* 用 contain 完整显示字帖，避免长图被裁掉上下内容；
+     留白用卡片自身的底色，避免出现突兀的色块 */
   object-fit: contain;
   display: block;
-  background: var(--surface-2);
+  background: var(--surface);
 }
 
 .poster-card--current .poster-card__media {
