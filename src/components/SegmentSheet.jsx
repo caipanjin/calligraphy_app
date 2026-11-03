@@ -50,8 +50,6 @@ const SegmentSheet = ({ image, db, onSelectCharacter, onClose }) => {
   const [draftRect, setDraftRect] = useState(null); // 百分比坐标 {left, top, width, height}
   const draftStartRef = useRef(null);
   const previewRef = useRef(null);
-  // 刚完成拖拽时抑制随后的 click（避免一次拖拽触发两次加框）
-  const justDraggedRef = useRef(false);
   const [practicedCount, setPracticedCount] = useState(0);
 
   // 先恢复这张字帖上次的版面设置与「是否带格子线」
@@ -272,8 +270,17 @@ const SegmentSheet = ({ image, db, onSelectCharacter, onClose }) => {
     if (!node) return null;
     const rect = node.getBoundingClientRect();
     if (!rect.width || !rect.height) return null;
-    const clientX = event.touches ? event.touches[0].clientX : event.clientX;
-    const clientY = event.touches ? event.touches[0].clientY : event.clientY;
+
+    // 触屏事件：touchend 的 touches 是空数组，要用 changedTouches。
+    // 直接读 touches[0] 会抛 TypeError（实测踩到过）。
+    const touch =
+      (event.touches && event.touches[0]) ||
+      (event.changedTouches && event.changedTouches[0]) ||
+      null;
+    const clientX = touch ? touch.clientX : event.clientX;
+    const clientY = touch ? touch.clientY : event.clientY;
+    if (typeof clientX !== 'number' || typeof clientY !== 'number') return null;
+
     return {
       x: Math.min(1, Math.max(0, (clientX - rect.left) / rect.width)),
       y: Math.min(1, Math.max(0, (clientY - rect.top) / rect.height))
@@ -320,9 +327,17 @@ const SegmentSheet = ({ image, db, onSelectCharacter, onClose }) => {
     const width = Math.abs(point.x - start.x);
     const height = Math.abs(point.y - start.y);
 
-    // 太小的拖动视为误触，忽略
+    // 拖动距离过小 → 视为「单击」，直接生成默认大小的框。
+    // 不能依赖 click 事件：handleDrawStart 里调用了 preventDefault()，
+    // 浏览器不会再合成 click（实测导致单击永远不生效）。
     if (width < 0.02 || height < 0.02) {
       setDraftRect(null);
+      const defaultBox = inferDefaultBox(point);
+      if (defaultBox) {
+        setDrawing(false);
+        clearPracticeForImage();
+        applyBoxes(addBox(boxes, defaultBox, true));
+      }
       return;
     }
 
@@ -335,7 +350,6 @@ const SegmentSheet = ({ image, db, onSelectCharacter, onClose }) => {
 
     setDraftRect(null);
     setDrawing(false);
-    justDraggedRef.current = true;
     clearPracticeForImage();
     applyBoxes(addBox(boxes, box, true));
   };
@@ -392,28 +406,26 @@ const SegmentSheet = ({ image, db, onSelectCharacter, onClose }) => {
     };
   };
 
-  // 画框模式下单击（未拖动）→ 生成默认大小的框
-  const handlePreviewClick = (event) => {
-    if (!drawing) return;
-    // 如果刚完成一次拖拽，忽略这次 click
-    if (justDraggedRef.current) {
-      justDraggedRef.current = false;
-      return;
-    }
-    const point = pointToPercent(event);
-    if (!point) return;
-    const box = inferDefaultBox(point);
-    if (!box) return;
-    setDrawing(false);
-    clearPracticeForImage();
-    applyBoxes(addBox(boxes, box, true));
+
+  // 记录最后一次写入的 Promise，关闭前等待它完成，
+  // 避免「刚加完框就关闭」时重新加载读到旧数据
+  const saveChainRef = useRef(Promise.resolve());
+
+  const handleClose = useCallback(() => {
+    // 等最后一次写入完成再关闭，保证临摹页重新加载时能读到最新结果
+    saveChainRef.current.then(() => onClose()).catch(() => onClose());
+  }, [onClose]);
+
+  const queueSave = (promise) => {
+    saveChainRef.current = promise || Promise.resolve();
+    return saveChainRef.current;
   };
 
   const applyBoxes = (next) => {
     setEditedBoxes(next);
     setSelectedIndex(null);
-    if (!db || !manualKey) return;
-    writeSegmentation(db, manualKey, {
+    if (!db || !manualKey) return Promise.resolve(false);
+    const promise = writeSegmentation(db, manualKey, {
       boxes: next,
       layout: result && result.layout ? result.layout : 'vertical',
       strategy: 'manual',
@@ -423,6 +435,7 @@ const SegmentSheet = ({ image, db, onSelectCharacter, onClose }) => {
       // 框的数量/顺序变了，之前按索引存的单字取景会错位，直接清空
       adjustments: {}
     });
+    return queueSave(promise);
   };
 
   const handleDelete = () => {
@@ -466,7 +479,7 @@ const SegmentSheet = ({ image, db, onSelectCharacter, onClose }) => {
 
   return (
     <>
-      <div className="sheet-backdrop" onClick={onClose} />
+      <div className="sheet-backdrop" onClick={handleClose} />
       <div className="sheet" role="dialog" aria-modal="true" aria-label="自动切字">
         <div className="sheet__handle" />
         <div className="sheet__header">
@@ -498,7 +511,7 @@ const SegmentSheet = ({ image, db, onSelectCharacter, onClose }) => {
               {editing ? <FaCheck size={15} /> : <FaPen size={14} />}
             </button>
           )}
-          <button className="icon-btn" onClick={onClose} aria-label="关闭">
+          <button className="icon-btn" onClick={handleClose} aria-label="关闭">
             <FaTimes size={15} />
           </button>
         </div>
@@ -563,7 +576,6 @@ const SegmentSheet = ({ image, db, onSelectCharacter, onClose }) => {
               onTouchStart={handleDrawStart}
               onTouchMove={handleDrawMove}
               onTouchEnd={handleDrawEnd}
-              onClick={handlePreviewClick}
             >
               <img src={image} alt="切分结果" draggable={false} />
               {boxes.map((box, index) => (

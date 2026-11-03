@@ -29,16 +29,20 @@ export const readSegmentation = (db, key) =>
 
 export const writeSegmentation = (db, key, payload) =>
   new Promise((resolve) => {
-    const transaction = withStore(db, 'readwrite', (store) => {
+    // 注意：必须返回 transaction 本身，而不是 store。
+    // 之前误把 store 当成 transaction，导致 oncomplete 永远不触发，
+    // 依赖它完成的逻辑（如关闭面板前等待保存）会一直挂起。
+    const transaction = withStore(db, 'readwrite', (store, tx) => {
       store.put({ id: key, ...payload, savedAt: Date.now() });
-      return store;
+      return tx;
     });
-    if (!transaction) {
+    if (!transaction || typeof transaction.addEventListener !== 'function') {
       resolve(false);
       return;
     }
     transaction.oncomplete = () => resolve(true);
     transaction.onerror = () => resolve(false);
+    transaction.onabort = () => resolve(false);
   });
 
 /**

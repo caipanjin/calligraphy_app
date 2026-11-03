@@ -1286,6 +1286,65 @@ viewBox={
 
 npm test 共 90 项。
 
+## 第三十三轮：修复加框的两个问题（单击不生效 / 拖拽不保存）
+
+### 问题 1：点选只画了一个点，没有生成框
+
+**根因有三层**：
+
+1. `pointToPercent` 直接读 `event.touches[0].clientX`。
+   触屏 `touchend` 的 `touches` 是**空数组**（要点在 `changedTouches` 里），
+   于是抛 `TypeError: Cannot read properties of undefined (reading 'clientX')`。
+
+2. `handleDrawStart` 调用了 `event.preventDefault()`，
+   浏览器**不再合成 `click` 事件**，所以挂在 `onClick` 上的
+   `handlePreviewClick` 永远不会执行。
+
+3. 依赖 `click` 的设计本身不可靠（触屏与鼠标行为不一致）。
+
+**修正**：
+- `pointToPercent` 依次取 `touches[0]` → `changedTouches[0]` → `event.clientX`
+- **把「单击生成默认框」逻辑移进 `handleDrawEnd`**：
+  拖动距离 < 2% 即视为单击，直接生成默认框
+- 移除 `handlePreviewClick` 与 `onClick` 绑定，不再依赖 click
+
+### 问题 2：拖拽可以画出框，但没有保存
+
+**根因**：`writeSegmentation` 里把 `store` 当成了 `transaction`：
+
+```js
+const transaction = withStore(db, 'readwrite', (store) => {
+  store.put(...);
+  return store;          // ← 返回 store，不是 transaction
+});
+transaction.oncomplete = () => resolve(true);   // ← 绑在 store 上，永不触发
+```
+
+导致该 Promise **永远不会 resolve**。而关闭面板时新增的
+`saveChainRef.current.then(() => onClose())` 会一直挂起，面板关不掉、
+临摹页也不会重新加载，表现为「框没保存」。
+
+**修正**：`withStore` 的回调改为返回 `tx`（真正的 transaction），
+并加 `onabort` 兜底。
+
+### 验证（IMG_4580.JPG，触屏事件模拟）
+
+```
+1) 初始网格数      45
+2) 单击后          46  PASS
+3) 拖拽后          47  PASS
+4) 关闭后网格数    47  PASS 已保存
+load 日志：[load] found boxes = 46, cacheKey = vertical:free:manual, gridVersion = 1
+```
+
+### 这个 transaction bug 的影响范围
+
+`writeSegmentation` 被多处使用（切分缓存、手动调整写回、字帖设置）。
+之前所有「等待写入完成」的逻辑都拿不到回调，只是因为多数调用方
+不依赖返回值，所以问题一直没暴露。本次因「关闭前等待保存」才显现。
+
+npm test 共 90 项。
+
 ## 遗留
 
 - 未用真实手机拍摄的字帖照片验证（合成图偏「干净」），透视/阴影可能影响切分
