@@ -10,7 +10,8 @@ import {
   isWeChatBlockedPage,
   looksLikeSticker,
   describeImageRisk,
-  readImageSize
+  readImageSize,
+  extractContentImageUrls
 } from '../src/utils/wechatArticle.js';
 
 let passed = 0;
@@ -132,6 +133,48 @@ check('从 data URL 读尺寸：PNG', () => {
 check('从 data URL 读尺寸：非法输入安全', () => {
   assert.deepEqual(readImageSize(''), { width: 0, height: 0, mime: '' });
   assert.deepEqual(readImageSize(null), { width: 0, height: 0, mime: '' });
+});
+
+check('正文提取：排除作者头像', () => {
+  const html = `
+    <img class="jump_author_avatar" src="https://mmbiz.qpic.cn/mmbiz_png/AVATAR/0?wx_fmt=png">
+    <img src="https://mmbiz.qpic.cn/sz_mmbiz_jpg/CONTENT/0?wx_fmt=jpeg">
+  `;
+  const urls = extractContentImageUrls(html);
+  assert.equal(urls.length, 1);
+  assert.ok(urls[0].includes('/CONTENT/'));
+});
+
+check('正文提取：排除二维码', () => {
+  const html = `
+    <img class="jump_wx_qrcode_img js_qrcode_img" src="https://mmbiz.qpic.cn/mmbiz_png/QR/0?wx_fmt=png">
+    <img src="https://mmbiz.qpic.cn/sz_mmbiz_jpg/CONTENT/0?wx_fmt=jpeg">
+  `;
+  assert.equal(extractContentImageUrls(html).length, 1);
+});
+
+check('正文提取：排除封面（og:image / msg_cdn_url）', () => {
+  const html = `
+    <meta property="og:image" content="https://mmbiz.qpic.cn/sz_mmbiz_jpg/COVER/0?wx_fmt=jpeg">
+    var msg_cdn_url = "https://mmbiz.qpic.cn/sz_mmbiz_jpg/COVER2/0?wx_fmt=jpeg";
+    <img src="https://mmbiz.qpic.cn/sz_mmbiz_jpg/CONTENT/0?wx_fmt=jpeg">
+  `;
+  const urls = extractContentImageUrls(html);
+  assert.equal(urls.length, 1);
+  assert.ok(urls[0].includes('/CONTENT/'));
+});
+
+check('正文提取：无干扰标记时全部保留', () => {
+  const html = `
+    <img src="https://mmbiz.qpic.cn/sz_mmbiz_jpg/A/0?wx_fmt=jpeg">
+    <img src="https://mmbiz.qpic.cn/sz_mmbiz_jpg/B/0?wx_fmt=jpeg">
+  `;
+  assert.equal(extractContentImageUrls(html).length, 2);
+});
+
+check('正文提取：空输入安全', () => {
+  assert.deepEqual(extractContentImageUrls(''), []);
+  assert.deepEqual(extractContentImageUrls(null), []);
 });
 
 // 真实文章回归（若存在抓取样本）

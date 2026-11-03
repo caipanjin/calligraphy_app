@@ -8,7 +8,7 @@ import {
   FaClipboard
 } from 'react-icons/fa';
 import {
-  extractImageUrls,
+  extractContentImageUrls,
   isWeChatArticleUrl,
   pickFirstUrl,
   isWeChatBlockedPage,
@@ -131,7 +131,9 @@ const ImportSheet = ({ onImport, onClose, initialUrl = '' }) => {
         return;
       }
 
-      const urls = extractImageUrls(text);
+      // 只取正文图片：微信页面里封面、头像、二维码都有明确标记，直接排除，
+      // 比靠尺寸/视觉相似度去猜可靠得多
+      const urls = extractContentImageUrls(text);
       if (urls.length === 0) {
         setErrorMessage(
           throttled

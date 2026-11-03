@@ -136,6 +136,94 @@ export const describeImageRisk = ({ width, height }) => {
 };
 
 /**
+ * 从文章 HTML 中提取「正文图片」（排除头像、二维码、封面等干扰图）
+ *
+ * 为什么需要这个：
+ * 全篇正则匹配会把封面（og:image / d.cover）、作者头像（jump_author_avatar）、
+ * 跳转二维码（js_qrcode_img）一起抓出来，靠尺寸和视觉相似度去猜并不可靠。
+ *
+ * 微信页面里这些干扰图都有明确的 class / 变量名，直接排除最准确。
+ * 优先取 #js_content（正文容器）范围内的图片。
+ */
+const NOISE_MARKERS = [
+  // 头像 / 二维码（DOM 里的 class）
+  'jump_author_avatar',
+  'js_qrcode_img',
+  'jump_wx_qrcode',
+  'js_pc_weapp_code_img',
+  'round_head_img',
+  // 封面（meta 与 JS 变量）
+  'og:image',
+  'twitter:image',
+  'msg_cdn_url',
+  'd.cover',
+  'cdn_1_1_img',
+  'cdn_url_1_1',
+  'cdn_url_235_1',
+  // 通用封面变量（var cdn_url = "..." 形式）
+  'cdn_url:'
+];
+
+export const extractContentImageUrls = (html) => {
+  if (typeof html !== 'string' || html.length === 0) return [];
+
+  // 逐张图判断：找到每个 URL，看它「归属」的标签是否带干扰特征。
+  // 不能按大片段切分 —— 微信页面里一个 div 内可能同时包含封面和正文图，
+  // 整段丢弃会把正文图一起丢掉（实测 h1 有 8 张图挤在同一片段里）。
+  const results = [];
+  const seen = new Set();
+  const pattern = new RegExp(IMAGE_URL_PATTERN.source, 'g');
+  let match;
+
+  while ((match = pattern.exec(html)) !== null) {
+    const url = normalizeUrl(match[0]);
+    const position = match.index;
+
+    // 只看「紧邻的上下文」：从该 URL 往前到最近一个标签起点为止。
+    // 窗口不能太大 —— 否则会把上一张图的干扰标记也算进来（实测会误杀正文图）。
+    const lookbackStart = Math.max(0, position - 300);
+    const rawContext = html.slice(lookbackStart, position);
+    const lastTagStart = Math.max(
+      rawContext.lastIndexOf('<img'),
+      rawContext.lastIndexOf('<image'),
+      rawContext.lastIndexOf('<meta')
+    );
+    const context = lastTagStart >= 0 ? rawContext.slice(lastTagStart) : rawContext.slice(-160);
+
+    const isNoise = NOISE_MARKERS.some((marker) => context.includes(marker));
+    if (isNoise) continue;
+
+    // 已经在正文容器内（js_content）的图，可信度更高，即使上下文没标记也保留
+    if (seen.has(url)) continue;
+    seen.add(url);
+    results.push(url);
+  }
+
+  // 若逐张判断后一张都不剩（可能是所有图都被误判），退回原逻辑但只排除强特征
+  if (results.length === 0) {
+    const strongNoise = ['jump_author_avatar', 'js_qrcode_img', 'jump_wx_qrcode', 'js_pc_weapp_code_img'];
+    const fallback = new RegExp(IMAGE_URL_PATTERN.source, 'g');
+    let m2;
+    while ((m2 = fallback.exec(html)) !== null) {
+      const url = normalizeUrl(m2[0]);
+      const rawContext = html.slice(Math.max(0, m2.index - 300), m2.index);
+      const lastTagStart = Math.max(
+        rawContext.lastIndexOf('<img'),
+        rawContext.lastIndexOf('<image'),
+        rawContext.lastIndexOf('<meta')
+      );
+      const context = lastTagStart >= 0 ? rawContext.slice(lastTagStart) : rawContext.slice(-160);
+      if (strongNoise.some((marker) => context.includes(marker))) continue;
+      if (seen.has(url)) continue;
+      seen.add(url);
+      results.push(url);
+    }
+  }
+
+  return results;
+};
+
+/**
  * 计算图片的 dHash（差值感知哈希）
  *
  * 为什么需要它：
