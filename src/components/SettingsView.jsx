@@ -140,7 +140,7 @@ const SettingsView = ({
           <div className="settings-row">
             <FaInfoCircle size={14} style={{ color: 'var(--ink-3)' }} />
             <span className="settings-row__label">版本</span>
-            <span className="settings-row__value">1.0.0</span>
+            <span className="settings-row__value">1.1.0</span>
           </div>
           <div className="settings-row">
             <FaRegLightbulb size={14} style={{ color: 'var(--ink-3)' }} />
