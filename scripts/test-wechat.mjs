@@ -164,6 +164,18 @@ check('正文提取：排除封面（og:image / msg_cdn_url）', () => {
   assert.ok(urls[0].includes('/CONTENT/'));
 });
 
+check('正文提取：不能把正文图当封面排除（cdn_url 是通用字段）', () => {
+  // 正文图片列表 picture_page_info_list 里也用 cdn_url，
+  // 若把 cdn_url 当干扰标记会把正文图全部误杀
+  const html = `
+    picture_page_info_list: [ { cdn_url: 'https://mmbiz.qpic.cn/sz_mmbiz_jpg/FULL/0?wx_fmt=jpeg' } ]
+    share_cover: { cdn_url: 'https://mmbiz.qpic.cn/sz_mmbiz_jpg/COVER/0?wx_fmt=jpeg' }
+  `;
+  const urls = extractContentImageUrls(html);
+  assert.ok(urls.some((u) => u.includes('/FULL/')), '正文图应保留');
+  assert.ok(!urls.some((u) => u.includes('/COVER/')), 'share_cover 应排除');
+});
+
 check('正文提取：无干扰标记时全部保留', () => {
   const html = `
     <img src="https://mmbiz.qpic.cn/sz_mmbiz_jpg/A/0?wx_fmt=jpeg">

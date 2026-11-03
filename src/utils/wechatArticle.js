@@ -152,16 +152,21 @@ const NOISE_MARKERS = [
   'jump_wx_qrcode',
   'js_pc_weapp_code_img',
   'round_head_img',
-  // 封面（meta 与 JS 变量）
+  // 分享封面（meta）
   'og:image',
   'twitter:image',
   'msg_cdn_url',
   'd.cover',
+  // 封面 / 缩略图专用变量
+  // 注意：不能把通用的 'cdn_url' 当干扰标记 ——
+  // 正文图片列表 picture_page_info_list 里也用 cdn_url 字段，
+  // 一律排除会把正文图全部丢掉（实测把 1080x2009 的完整图误杀）。
   'cdn_1_1_img',
   'cdn_url_1_1',
   'cdn_url_235_1',
-  // 通用封面变量（var cdn_url = "..." 形式）
-  'cdn_url:'
+  'share_cover',
+  'watermark_info',
+  'thumb_url'
 ];
 
 export const extractContentImageUrls = (html) => {
