@@ -31,6 +31,9 @@ const LAYOUT_OPTIONS = [{ value: 'vertical', label: '竖排' }];
  */
 const SegmentSheet = ({ image, db, onSelectCharacter, onClose }) => {
   const [status, setStatus] = useState('loading');
+  // 重新切分反馈：进行中（一直显示）与已完成（4 秒后消失）
+  const [retryPending, setRetryPending] = useState(false);
+  const [retryNotice, setRetryNotice] = useState('');
   const [result, setResult] = useState(null);
   const [layout, setLayout] = useState('vertical');
   const [hasGrid, setHasGrid] = useState(false);
@@ -140,6 +143,17 @@ const SegmentSheet = ({ image, db, onSelectCharacter, onClose }) => {
         setStatus(empty ? 'empty' : 'done');
 
         if (!empty) {
+          // 重新切分完成：给出明确反馈（结果可能与上次相同，用户需要知道确实执行了）
+          if (attempt > 0) {
+            const previousCount = result && result.boxes ? result.boxes.length : 0;
+            const nextCount = segmentation.boxes.length;
+            setRetryPending(false);
+            setRetryNotice(
+              previousCount > 0 && previousCount === nextCount
+                ? `已重新切分，共 ${nextCount} 字（与上次结果相同）`
+                : `已重新切分，共 ${nextCount} 字`
+            );
+          }
           // 点「重新切分」时清掉之前的手动调整，否则重开时手动记录会盖掉新结果
           if (attempt > 0) {
             deleteSegmentation(db, `${cacheKey}:manual`);
@@ -153,7 +167,10 @@ const SegmentSheet = ({ image, db, onSelectCharacter, onClose }) => {
           });
         }
       } catch (error) {
-        if (!cancelled) setStatus('error');
+        if (!cancelled) {
+          setStatus('error');
+          setRetryPending(false);
+        }
       }
     };
 
@@ -164,6 +181,13 @@ const SegmentSheet = ({ image, db, onSelectCharacter, onClose }) => {
     };
   }, [image, layout, hasGrid, attempt, db, settingsLoaded]);
 
+  // 仅「已完成」提示在 4 秒后自动消失（进行中提示要一直显示到计算完成）
+  useEffect(() => {
+    if (!retryNotice) return undefined;
+    const timer = setTimeout(() => setRetryNotice(''), 4000);
+    return () => clearTimeout(timer);
+  }, [retryNotice]);
+
   useEffect(() => {
     const onKeyDown = (event) => {
       if (event.key === 'Escape') onClose();
@@ -172,7 +196,11 @@ const SegmentSheet = ({ image, db, onSelectCharacter, onClose }) => {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [onClose]);
 
-  const handleRetry = useCallback(() => setAttempt((value) => value + 1), []);
+  const handleRetry = useCallback(() => {
+    setRetryPending(true);
+    setRetryNotice('');
+    setAttempt((value) => value + 1);
+  }, []);
 
   /** 若该字帖已有练习记录，先确认（会重置记录） */
   const confirmIfPracticed = useCallback(
@@ -552,6 +580,13 @@ const SegmentSheet = ({ image, db, onSelectCharacter, onClose }) => {
             <div className="sheet-empty">
               <FaExclamationTriangle />
               <span>没有找到可切分的文字区域。字距太密或背景较脏时，建议手动点选。</span>
+            </div>
+          )}
+
+          {(retryPending || retryNotice) && (
+            <div className={`seg-retry-notice${retryPending ? ' seg-retry-notice--pending' : ''}`}>
+              {retryPending ? <FaRedo size={12} /> : <FaCheck size={12} />}
+              {retryPending ? '正在重新切分…' : retryNotice}
             </div>
           )}
 

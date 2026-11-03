@@ -3,6 +3,7 @@
  * 运行：npm test
  */
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import {
   findBands,
   otsuThreshold,
@@ -365,6 +366,15 @@ check('碎片过滤：宽高都小的贴边残块应过滤', () => {
   const fragment = { x: 0, y: 0, width: 50, height: 40 };
   const medianW = 200;
   assert.equal(fragment.width >= medianW * 0.6, false, '窄碎片应被过滤');
+});
+
+check('切分结果必须包含 imageWidth/imageHeight（原图尺寸）', () => {
+  // 这两个字段用于缓存命中判断，缺失会导致缓存永不命中、
+  // 每次打开切分面板都重新计算并冲掉用户的手动调整。
+  // 这里做静态检查：源码里必须存在这两个字段的赋值。
+  const src = fs.readFileSync(new URL('../src/utils/segment.js', import.meta.url), 'utf8');
+  assert.ok(/imageWidth:\s*img\.naturalWidth/.test(src), 'imageWidth 应取 img.naturalWidth');
+  assert.ok(/imageHeight:\s*img\.naturalHeight/.test(src), 'imageHeight 应取 img.naturalHeight');
 });
 
 console.log(`\n${passed} 项通过`);

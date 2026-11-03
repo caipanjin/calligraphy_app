@@ -1192,6 +1192,11 @@ export const segmentCharacters = async (imageSrc, options = {}) => {
     debug,
     pitch: pitch / scale,
     scale,
+    // 原图尺寸：调用方用它判断缓存是否仍与当前图片匹配。
+    // 必须直接取 img 的真实尺寸 —— 用 W/scale 反推会有 1~2px 舍入误差，
+    // 导致与 naturalWidth 严格相等判断失败、缓存永不命中。
+    imageWidth: img.naturalWidth || img.width,
+    imageHeight: img.naturalHeight || img.height,
     failed: false,
     charSize: {
       width: median(usable.map((box) => box.width)),

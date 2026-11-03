@@ -1426,6 +1426,95 @@ x1571 y4263 634x266  宽比 1.01 高比 0.41  底边 y=4529
 `scripts/test-segment.mjs` 新增 2 项（简单笔画保留、窄碎片过滤），
 共 33 项；npm test 共 92 项。
 
+## 第三十五轮：修复「重新切分无效」与「手动调整被覆盖」
+
+### 现象
+
+用户反馈两点：
+
+1. 点击「重新切分」没有效果（框位置不更新）
+2. 调整了字框位置后，重新切分也无法恢复
+
+### 排查过程
+
+**第一层**：确认重新切分是否真的执行
+
+加日志后发现 `attempt` 从 0 → 1，`segmentCharacters` **确实被重新调用**，
+所以「没生效」不是没执行，而是结果看起来没变。
+
+**第二层**：用「框集合」而非「固定索引」对比
+
+之前用 `boxIndex=4` 做对比无法判断——因为 `sortByReadingOrder` 会改变顺序，
+索引 4 在重算前后指向不同的字。改为对比整个位置集合后确认：
+**46 个框位置一个都没变**。
+
+**第三层**：定位真正的根因
+
+打印缓存检查日志：
+
+```
+[cache-check] auto hit? true boxes= 46 cachedW=  naturalW= 1768 match= false
+```
+
+**`cached.imageWidth` 是 undefined**，导致缓存永远不命中。
+
+追到源头：`segmentCharacters` 的返回值里**根本没有 `imageWidth` / `imageHeight`**，
+而 `PracticeView` 写入缓存时写的是：
+
+```js
+imageWidth: segmentation.imageWidth,    // ← undefined
+imageHeight: segmentation.imageHeight,  // ← undefined
+```
+
+而 `SegmentSheet` 读缓存时要求：
+
+```js
+cached.imageWidth === naturalWidth      // undefined === 1768 → false
+```
+
+### 完整因果链
+
+```
+segmentCharacters 不返回 imageWidth
+  → 缓存里 imageWidth = undefined
+  → 切分面板读缓存时判断失败 → 从不命中
+  → 每次打开面板都重新切分
+  → 单字页的调整（写回 boxes）没被读取
+  → 面板显示的是自动切分结果
+  → 点「重新切分」结果当然一样 → 看起来「无效」
+```
+
+**所以「重新切分无效」的表象，实际是「缓存从不命中，面板一直在重算」**。
+用户调整的位置在单字页生效（boxes 已写入），但切分面板看不到。
+
+### 修正
+
+1. `segmentCharacters` 返回值补充 `imageWidth` / `imageHeight`
+
+   **难点**：不能用 `W / scale` 反推——分析尺寸有舍入，反推会得到 1766 而实际 1768，
+   严格相等判断依然失败。必须直接取 `img.naturalWidth` / `img.naturalHeight`。
+
+2. 给「重新切分」加明确反馈（此前点击后无任何提示）：
+   - 点击立即显示「正在重新切分…」（旋转图标，持续到计算完成）
+   - 完成后显示「已重新切分，共 N 字」，若数量与上次相同则注明「（与上次结果相同）」
+   - 完成后 4 秒自动消失
+
+### 验证
+
+```
+B) 缩小 5 次后   库中 w=342, adj=true     调整已保存
+C) 打开面板      显示 1934（=342）        ← 缓存命中了
+D) 点重新切分    显示 1221（=216）        ← 恢复自动结果
+                 库中 w=216, adj=false
+```
+
+对比修复前：`cachedW=undefined match=false` → 修复后 `cachedW=1768 match=true`。
+
+### 测试
+
+`scripts/test-segment.mjs` 新增 1 项（返回值必须含原图尺寸的静态校验），
+共 34 项；npm test 共 93 项。
+
 ## 遗留
 
 - 未用真实手机拍摄的字帖照片验证（合成图偏「干净」），透视/阴影可能影响切分

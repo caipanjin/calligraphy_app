@@ -1183,6 +1183,33 @@ button {
 }
 
 /* 拖拽中的草稿矩形 */
+/* 重新切分的结果提示 */
+.seg-retry-notice {
+  display: flex;
+  animation: none;
+  align-items: center;
+  gap: 6px;
+  margin: 0 18px 10px;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 12.5px;
+  letter-spacing: 0.02em;
+  animation: clip-in 0.24s ease both;
+}
+
+/* 进行中：图标旋转，提示正在计算 */
+.seg-retry-notice--pending svg {
+  animation: seg-spin 0.9s linear infinite;
+}
+
+@keyframes seg-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .seg-draft {
   position: absolute;
   border: 2px dashed var(--accent);
