@@ -189,6 +189,73 @@ const percentile = (values, ratio) => {
   return sorted[index];
 };
 
+/**
+ * 找回被 minSize 过滤掉的「极扁但极宽」的段（典型是「一」字）
+ *
+ * 「一」只有一横，高度可能只有 8~9px，远低于 minSize（约 H×1.5%）。
+ * 但它的**墨迹横跨整个列宽**，这是它与噪点/残块最本质的区别。
+ * 一维投影看不到宽度，只能在调用处补偿。
+ */
+const recoverFlatStrokes = (ink, W, colStart, colEnd, bands, minSize, minGap) => {
+  const colWidth = colEnd - colStart;
+  if (colWidth <= 0 || minSize <= 0) return bands;
+
+  const height = ink.length / W;
+  const prof = projectRows(ink, W, height, colStart, colEnd);
+  const all = findBands(prof, { relInk: INK_RATIO, minGap, minSize: 1 });
+  const dropped = all.filter((band) => band.end - band.start < minSize);
+  if (dropped.length === 0) return bands;
+
+  // 如果一列里有多个被过滤的小段，说明它们是规律性的装饰线/格线残留
+  // （实测：带格线的字帖每列都有 3~5 个），而不是孤立的「一」字。
+  // 真正独立的「一」在一列里最多出现 1 次。
+  if (dropped.length > 1) return bands;
+
+  const recovered = [];
+  for (const band of dropped) {
+    let minX = colEnd;
+    let maxX = colStart;
+    let inkCount = 0;
+    for (let y = band.start; y < band.end; y += 1) {
+      for (let x = colStart; x < colEnd; x += 1) {
+        if (ink[y * W + x]) {
+          inkCount += 1;
+          if (x < minX) minX = x;
+          if (x > maxX) maxX = x;
+        }
+      }
+    }
+    if (inkCount === 0) continue;
+    const inkWidth = maxX - minX + 1;
+    // 墨迹横跨列宽 70% 以上才算「简单笔画字」（「一」几乎占满）
+    if (inkWidth < colWidth * 0.7) continue;
+
+    // 密度校验：真正的「一」是粗壮的一横，框内墨迹占比高；
+    // 装饰线/分割线虽然也占满宽度，但细如发丝，密度极低（实测 0%）。
+    const boxArea = (band.end - band.start) * (maxX - minX + 1);
+    const density = boxArea > 0 ? inkCount / boxArea : 0;
+    if (density < 0.25) continue;
+
+    // 与相邻字带的间距校验：独立的「一」上下都有明显空白；
+    // 而被拆分边界切出来的笔触残留会紧贴相邻字（间距 0~5px）。
+    const neighbors = bands.filter((b) => b !== band);
+    const gapAbove = neighbors
+      .filter((b) => b.end <= band.start)
+      .reduce((min, b) => Math.min(min, band.start - b.end), Infinity);
+    const gapBelow = neighbors
+      .filter((b) => b.start >= band.end)
+      .reduce((min, b) => Math.min(min, b.start - band.end), Infinity);
+    const nearestGap = Math.min(gapAbove, gapBelow);
+    if (!Number.isFinite(nearestGap) || nearestGap < Math.max(4, minGap * 0.5)) continue;
+
+    // 打标记：normalizeColumnCounts 裁剪时豁免这类「简单笔画字」
+    recovered.push({ ...band, simpleStroke: true });
+  }
+
+  if (recovered.length === 0) return bands;
+  return [...bands, ...recovered].sort((a, b) => a.start - b.start);
+};
+
 export const findBands = (sums, { relInk = INK_RATIO, minGap, minSize, smooth = 3 }) => {
   const profile = smoothProfile(sums, smooth);
   const reference = percentile(profile, INK_PERCENTILE);
@@ -617,6 +684,7 @@ export const buildGridBoxes = (ink, width, height, pitch, layout = 'vertical') =
 const normalizeColumnCounts = (boxes, columnRanges, layout) => {
   if (boxes.length < 4 || !columnRanges.length) return boxes;
 
+
   const groups = columnRanges.map(() => []);
   boxes.forEach((box) => {
     const center = layout === 'vertical' ? box.x + box.width / 2 : box.y + box.height / 2;
@@ -680,7 +748,8 @@ const normalizeColumnCounts = (boxes, columnRanges, layout) => {
     const last = sorted[sorted.length - 1];
     const sizeOf = (box) => (layout === 'vertical' ? box.height : box.width);
     // 极小的一律视为残块（可能在中间）；稍小但贴边的也视为残块
-    const tiny = sorted.filter((box) => sizeOf(box) < tinyLimit);
+    // 带 simpleStroke 标记的是「一」这类简单笔画字，不应作为残块裁剪
+    const tiny = sorted.filter((box) => sizeOf(box) < tinyLimit && !box.simpleStroke);
     const edgeCandidates = [first, last].filter(
       (box) => sizeOf(box) < edgeLimit && !tiny.includes(box)
     );
@@ -989,11 +1058,19 @@ export const segmentCharacters = async (imageSrc, options = {}) => {
       // 注意：竖排的列内是按「高度」切字，而 pitch 是横向周期，不能用于此处的等分
       const charBands = splitTallGlyphs(
         mergeSplitGlyphs(
-          findBands(projectRows(ink, W, H, col.start, col.end), {
-            relInk: INK_RATIO,
-            minGap: gapRow,
-            minSize: minSizeRow
-          }),
+          recoverFlatStrokes(
+            ink,
+            W,
+            col.start,
+            col.end,
+            findBands(projectRows(ink, W, H, col.start, col.end), {
+              relInk: INK_RATIO,
+              minGap: gapRow,
+              minSize: minSizeRow
+            }),
+            minSizeRow,
+            gapRow
+          ),
           0.25,
           columnWidth
         ),
@@ -1062,14 +1139,16 @@ export const segmentCharacters = async (imageSrc, options = {}) => {
         const boxTop = Math.min(band.start, vertical.top);
         const boxBottom = Math.max(band.end, vertical.bottom);
 
-        boxes.push(
-          toSource({
-            x: boxLeft,
-            y: boxTop,
-            width: boxRight - boxLeft,
-            height: boxBottom - boxTop
-          })
-        );
+        const sourceBox = toSource({
+          x: boxLeft,
+          y: boxTop,
+          width: boxRight - boxLeft,
+          height: boxBottom - boxTop
+        });
+        // 保留「简单笔画字」标记（toSource 只转坐标，标记需手动带上），
+        // 供 normalizeColumnCounts 裁剪时豁免
+        if (band.simpleStroke) sourceBox.simpleStroke = true;
+        boxes.push(sourceBox);
       });
     });
     // 竖排的高度拆分已由 splitTallGlyphs 按列宽完成，这里不再重复按中位值拆分
