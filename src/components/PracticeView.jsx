@@ -99,7 +99,7 @@ const PracticeView = ({
   const [pendingResumeIndex, setPendingResumeIndex] = useState(null);
   // 当前字帖的缓存键与已保存的单字取景调整
   const cacheKeyRef = useRef('');
-  const adjustmentsRef = useRef({});
+
   const saveTimerRef = useRef(null);
 
   const isCharMode = Boolean(selectedCharacter);
@@ -213,7 +213,32 @@ const PracticeView = ({
         setSavedLayout(found && found.layout ? found.layout : 'vertical');
         cacheKeyRef.current =
           (found && found.cacheKey) || `${prefix}${desiredLayout}:${desiredGrid ? 'grid' : 'free'}`;
-        adjustmentsRef.current = (found && found.adjustments) || {};
+        // 旧数据迁移：历史版本把调整存在 adjustments 里，
+        // 现在 boxes 是唯一数据源，进入时把旧调整合并进 boxes 并落盘
+        if (found && found.adjustments && Object.keys(found.adjustments).length > 0) {
+          const migrated = (found.boxes || []).map((box, i) => {
+            const old = found.adjustments[i];
+            if (!old) return box;
+            return {
+              ...box,
+              x: Math.round(old.x),
+              y: Math.round(old.y),
+              width: Math.round(old.width),
+              height: Math.round(old.height),
+              adjusted: true
+            };
+          });
+          setSavedBoxes(migrated);
+          if (db && found.cacheKey) {
+            writeSegmentation(db, found.cacheKey, {
+              boxes: migrated,
+              layout: found.layout,
+              strategy: found.strategy || 'manual',
+              imageWidth: found.boxes && found.boxes[0] ? found.imageWidth : undefined,
+              imageHeight: found.imageHeight
+            });
+          }
+        }
 
         // 续练：自动跳到上次练到的字（每次进入该字帖只做一次）
         if (resumePractice && found && found.boxes && found.boxes.length > 0 && !resumeAppliedRef.current) {
@@ -305,24 +330,28 @@ const PracticeView = ({
     const naturalHeight = naturalSize.height;
     if (!naturalWidth || !naturalHeight) return;
 
-    // 单字视图留白 12%：切分框可能与字形有轻微偏差，多留一点保证四边完整显示
-    const padding = Math.max(3, Math.round(Math.min(box.width, box.height) * 0.12));
-    const x = Math.max(0, box.x - padding);
-    const y = Math.max(0, box.y - padding);
-
-    const savedView = adjustmentsRef.current[index];
-    setSelectedCharacter({
-      src: image,
-      width: naturalWidth,
-      height: naturalHeight,
-      viewBox: savedView
-        ? { ...savedView }
-        : {
+    // 未调整过的框：加 12% 留白，保证切分框与字形有偏差时四边仍完整显示。
+    // 已调整过的框（box.adjusted）：直接用用户定好的取景，不再加 padding，
+    // 否则每次进入都会外扩，越调越大。
+    const viewBox = box.adjusted
+      ? { x: box.x, y: box.y, width: box.width, height: box.height }
+      : (() => {
+          const padding = Math.max(3, Math.round(Math.min(box.width, box.height) * 0.12));
+          const x = Math.max(0, box.x - padding);
+          const y = Math.max(0, box.y - padding);
+          return {
             x,
             y,
             width: Math.min(naturalWidth - x, box.width + padding * 2),
             height: Math.min(naturalHeight - y, box.height + padding * 2)
-          },
+          };
+        })();
+
+    setSelectedCharacter({
+      src: image,
+      width: naturalWidth,
+      height: naturalHeight,
+      viewBox,
       grid: { boxes: savedBoxes, index }
     });
   };
@@ -369,33 +398,87 @@ const PracticeView = ({
 
   /* ---------------- 单字模式：视图变换 ---------------- */
 
-  // 把当前字的取景写入缓存（防抖 500ms）
-  const scheduleSaveAdjustment = useCallback((index, viewBox) => {
-    if (index === null || index < 0 || !cacheKeyRef.current) return;
-    adjustmentsRef.current = {
-      ...adjustmentsRef.current,
-      [index]: { x: viewBox.x, y: viewBox.y, width: viewBox.width, height: viewBox.height }
-    };
-    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-    saveTimerRef.current = setTimeout(async () => {
-      if (!db || !cacheKeyRef.current) return;
+  // 待写入的调整：{ index, viewBox }（防抖期间暂存）
+  const pendingAdjustmentRef = useRef(null);
+
+  /**
+   * 把调整后的取景写回切分框
+   *
+   * 设计要点：
+   * - boxes 是唯一数据源（不再单独维护 adjustments）
+   * - 存入的是用户看到的精确取景（不含 padding）
+   * - 给该框打 adjusted 标记，后续进入不再额外加 padding，避免反复外扩
+   */
+  const persistAdjustment = useCallback(
+    async (index, viewBox) => {
+      if (index === null || index < 0 || !db || !cacheKeyRef.current) return;
       const key = cacheKeyRef.current;
       const existing = await readSegmentation(db, key);
       if (!existing) return;
+
+      const nextBoxes = (existing.boxes || []).map((box, i) =>
+        i === index
+          ? {
+              ...box,
+              x: Math.round(viewBox.x),
+              y: Math.round(viewBox.y),
+              width: Math.round(viewBox.width),
+              height: Math.round(viewBox.height),
+              adjusted: true
+            }
+          : box
+      );
+
+      // 先同步更新内存里的框：否则再次点击时仍用旧快照，
+      // 会重新加 padding（表现为「越调越大」）。
+      // 放在写库之前，避免组件卸载导致 setState 被丢弃。
+      setSavedBoxes(nextBoxes);
+
       await writeSegmentation(db, key, {
-        boxes: existing.boxes,
+        boxes: nextBoxes,
         layout: existing.layout,
         strategy: existing.strategy,
         imageWidth: existing.imageWidth,
-        imageHeight: existing.imageHeight,
-        adjustments: adjustmentsRef.current
+        imageHeight: existing.imageHeight
       });
-    }, 500);
-  }, [db]);
+    },
+    [db]
+  );
 
-  useEffect(() => () => {
-    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-  }, []);
+  // 立即落盘（切字 / 退出前调用，避免防抖被取消而丢数据）
+  const flushPendingAdjustment = useCallback(() => {
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+    const pending = pendingAdjustmentRef.current;
+    if (!pending) return;
+    pendingAdjustmentRef.current = null;
+    persistAdjustment(pending.index, pending.viewBox);
+  }, [persistAdjustment]);
+
+  // 把当前字的取景写入缓存（防抖 500ms）
+  const scheduleSaveAdjustment = useCallback(
+    (index, viewBox) => {
+      if (index === null || index < 0 || !cacheKeyRef.current) return;
+      pendingAdjustmentRef.current = { index, viewBox };
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = setTimeout(() => {
+        const pending = pendingAdjustmentRef.current;
+        pendingAdjustmentRef.current = null;
+        if (pending) persistAdjustment(pending.index, pending.viewBox);
+      }, 500);
+    },
+    [persistAdjustment]
+  );
+
+  useEffect(
+    () => () => {
+      // 组件卸载时把待写入的调整落盘，避免丢失
+      flushPendingAdjustment();
+    },
+    [flushPendingAdjustment]
+  );
 
   const applyViewBox = useCallback(
     (updater) => {
@@ -437,6 +520,10 @@ const PracticeView = ({
 
   const boxToViewBox = useCallback(
     (box) => {
+      // 已调整过的框直接用存储值（不再加 padding，避免反复外扩）
+      if (box.adjusted) {
+        return { x: box.x, y: box.y, width: box.width, height: box.height };
+      }
       const padding = Math.max(2, Math.round(Math.min(box.width, box.height) * 0.06));
       const x = Math.max(0, box.x - padding);
       const y = Math.max(0, box.y - padding);
@@ -459,28 +546,14 @@ const PracticeView = ({
       if (saveTimerRef.current) {
         clearTimeout(saveTimerRef.current);
         saveTimerRef.current = null;
-        if (db && cacheKeyRef.current) {
-          const key = cacheKeyRef.current;
-          readSegmentation(db, key).then((existing) => {
-            if (!existing) return;
-            writeSegmentation(db, key, {
-              boxes: existing.boxes,
-              layout: existing.layout,
-              strategy: existing.strategy,
-              imageWidth: existing.imageWidth,
-              imageHeight: existing.imageHeight,
-              adjustments: adjustmentsRef.current
-            });
-          });
-        }
+        flushPendingAdjustment();
       }
       const box = grid.boxes[index];
-      const savedView = adjustmentsRef.current[index];
       setSelectedCharacter((prev) =>
         prev
           ? {
               ...prev,
-              viewBox: savedView ? { ...savedView } : boxToViewBox(box),
+              viewBox: boxToViewBox(box),
               grid: { boxes: grid.boxes, index }
             }
           : prev

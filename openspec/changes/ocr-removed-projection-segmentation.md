@@ -1154,6 +1154,53 @@ viewBox={
 修改 `.char-strip` 时误把 `display: flex` 等属性挤到了 CSS 规则外面，
 导致缩略图失去布局约束、被撑得很大。已修复。
 
+## 第三十轮：单字调整写回切分框（boxes 成为唯一数据源）
+
+### 需求
+
+把单字的缩放/位移调整**同步写回原始切分框**，让切分面板与临摹页共用同一份数据。
+
+### 改造要点
+
+1. **boxes 成为唯一数据源**：废弃按索引存的 `adjustments`
+2. **写回精确取景**：存入的是用户看到的范围（不含 padding）
+3. **打 `adjusted` 标记**：已调整的框后续进入不再额外加 padding
+4. **旧数据迁移**：历史 `adjustments` 在加载时合并进 `boxes` 并落盘
+
+### 踩的三个坑（都已修复）
+
+**坑 1：padding 会累积放大**
+
+`boxToViewBox` 每次进入都会加 6% padding，`handleSavedBoxClick` 加 12%。
+若写回后仍加 padding，每次进入都会外扩，越调越大。
+→ 用 `box.adjusted` 标记区分：调整过的不再加 padding。
+
+**坑 2：setState 在 await 之后被丢弃**
+
+`persistAdjustment` 原本先 `await writeSegmentation(...)` 再 `setSavedBoxes`。
+若此时组件已卸载，React 丢弃该 setState，导致内存快照仍是旧值。
+→ 把 `setSavedBoxes` 提到 `await` 之前。
+
+**坑 3：两处写库位置不一致**
+
+`scheduleSaveAdjustment`（防抖）和 `selectGridIndex`（切字前立即落盘）
+各自写库。抽成共用的 `persistAdjustment` + `flushPendingAdjustment`，
+避免逻辑分叉。
+
+### 验证
+
+```
+1) 原始框          x=1015 y=1220 w=257 h=279  adj=false
+2) 放大 3 次后      x=1005 y=1213 w=275 h=295  adj=true
+   数据库同步写入，viewBox 与框完全一致
+3) 反复重进 3 次    viewBox w=275 | 框 w=275  → 不再累积外扩
+```
+
+### 已知影响
+
+调整后框变大时，切分网格里会压住相邻框 —— 这是预期行为（用户主动调整），
+已确认接受。
+
 ## 遗留
 
 - 未用真实手机拍摄的字帖照片验证（合成图偏「干净」），透视/阴影可能影响切分
