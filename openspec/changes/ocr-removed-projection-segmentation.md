@@ -1730,6 +1730,65 @@ t8 的 19 个框里有 2 个是印章（`x46 y1197 159x50`、`x46 y1317 159x50`�
 
 npm test 共 93 项。
 
+## 第三十九轮：修复 iOS 因内存不足被杀（OOM）
+
+### 现象
+
+```
+The app "App" has been killed by the operating system
+because it is using too much memory.
+Message from debugger: Terminated due to memory issue
+```
+
+### 根因：三处全尺寸解码叠加
+
+**① 字帖库直接渲染原图（主因）**
+
+```jsx
+<img src={item.url} alt="" />   // 完整原图的 data URL
+```
+
+单张解码内存（每像素 4 字节 RGBA）：
+
+| 图片 | 尺寸 | 解码内存 |
+|---|---|---|
+| IMG_4446 | 4283x4530 | **74 MB** |
+| IMG_4580 | 1768x2879 | 19.4 MB |
+| 带格线字帖 | 1440x2031 | 11.2 MB |
+
+字帖上限提到 20 后，列表一次性解码 → **286 MB 起步，大图更多**。
+
+**② Magnifier 双份解码**
+
+`imageSrc` 与 `largeImageSrc` 是同一张大图的两份副本，
+4000x4500 的图因此多占 74MB。移动端本来靠双指缩放，悬停放大并不必要。
+
+**③ probe 解码后未释放**
+
+`new Image()` 探尺寸，用完没清空 `src`，位图与切分/放大镜副本同时驻留。
+
+### 修正
+
+1. **新增 `src/utils/thumbnail.js`**：字帖库只渲染 240px 缩略图
+   - 原图 1768x2879（19.4MB）→ 缩略图 147x240（**0.14MB**，约 140 倍）
+   - Map 内存缓存 + `loading="lazy"` + `decoding="async"`
+2. **移除 Magnifier 改用普通 `<img>`**：消除双份解码，
+   bundle 320KB → **247KB**，依赖中移除 `react-image-magnifiers`
+3. **probe 用完释放**：`probe.src = ''`
+
+### 验证
+
+```
+临摹页网格        46 个（功能正常）
+stage-frame 是 img  true
+图片尺寸           1768x2879（临摹页仍用原图，清晰度不变）
+卡片缩略图         147x240，src 仅 15.7KB
+```
+
+关键：**只在列表用缩略图，进入临摹页才加载原图**。
+
+npm test 共 93 项。
+
 ## 遗留
 
 - 未用真实手机拍摄的字帖照片验证（合成图偏「干净」），透视/阴影可能影响切分
