@@ -1824,6 +1824,62 @@ npm test 共 93 项。
 
 npm test 共 93 项。
 
+## 第四十一轮：缩略图在 iOS 上空白（改用 createImageBitmap 按尺寸解码）
+
+### 现象
+
+缩略图在**浏览器里显示正常**，但在 **iOS 真机上为空白**。
+
+### 排查
+
+浏览器实测该图缩略图完全正常：
+
+```
+t9.jpg → 109x240，12055 字节，亮度 37~218（有内容）
+UI 卡片：displayed 173x231，objectFit contain，opacity 1，亮度 19~215
+```
+
+所以问题只在 iOS。
+
+### 根因
+
+旧实现用 `new Image()` + `ctx.drawImage(img, 0, 0, w, h)`：
+
+```js
+img.src = dataUrl;              // ① 先解码全尺寸原图（4283x4530 = 74MB）
+ctx.drawImage(img, 0, 0, w, h); // ② 再从全图缩放到 canvas
+```
+
+**iOS 内存紧张时 `drawImage` 会静默失败**（不抛异常），
+canvas 只剩已铺的白底 → 表现为「缩略图空白」。
+
+这与之前的 OOM 是同一类根因：**为了生成 240px 的缩略图，却要先把整张原图解码进内存**。
+
+### 修正：createImageBitmap + resizeWidth
+
+```js
+const bitmap = await createImageBitmap(blob, {
+  resizeWidth: THUMB_SIZE,      // 解码时就直接按目标尺寸采样
+  resizeQuality: 'high'
+});
+ctx.drawImage(bitmap, 0, 0);
+bitmap.close();                 // 立即释放
+```
+
+**关键优势**：解码阶段就按目标尺寸采样，**不会把全尺寸原图解码进内存**。
+
+保留 `makeThumbnailFallback`（`new Image` + `drawImage`）作为老环境降级路径。
+
+### 验证
+
+```
+t9.jpg: 240x531 | 37947 字节 | 0ms | 亮度 38~211 ✓ 有内容
+```
+
+耗时从「需解码全图」降到接近 0ms。
+
+npm test 共 93 项。
+
 ## 遗留
 
 - 未用真实手机拍摄的字帖照片验证（合成图偏「干净」），透视/阴影可能影响切分

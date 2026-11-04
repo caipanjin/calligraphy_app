@@ -26,6 +26,67 @@ export const makeThumbnail = (dataUrl) => {
 
   if (cache.has(dataUrl)) return Promise.resolve(cache.get(dataUrl));
 
+  // 首选方案：createImageBitmap + resizeWidth
+  // 关键优势：解码时就直接按目标尺寸采样，**不会把整张原图解码进内存**。
+  // 之前的做法是 new Image() + drawImage，需要先解码全尺寸原图
+  //（4283x4530 就要 74MB），iOS 内存紧张时 drawImage 会静默失败，
+  // canvas 只剩白底 → 表现为「缩略图空白」。
+  if (typeof createImageBitmap === 'function') {
+    return fetchThumbViaBitmap(dataUrl).then((thumb) => {
+      if (thumb) {
+        cache.set(dataUrl, thumb);
+        return thumb;
+      }
+      return makeThumbnailFallback(dataUrl);
+    });
+  }
+
+  return makeThumbnailFallback(dataUrl);
+};
+
+/** 用 createImageBitmap 直接按目标尺寸解码（内存占用极低） */
+const fetchThumbViaBitmap = async (dataUrl) => {
+  try {
+    const blob = await (await fetch(dataUrl)).blob();
+    const bitmap = await createImageBitmap(blob, {
+      resizeWidth: THUMB_SIZE,
+      resizeQuality: 'high'
+    });
+
+    const w = bitmap.width;
+    const h = bitmap.height;
+    if (w < 8 || h < 8) {
+      bitmap.close();
+      return '';
+    }
+
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      bitmap.close();
+      return '';
+    }
+    // 铺白底：JPEG 不支持透明通道，透明区域会被编码成纯黑
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, w, h);
+    ctx.drawImage(bitmap, 0, 0);
+    bitmap.close();
+
+    const thumb = canvas.toDataURL('image/jpeg', 0.75);
+    canvas.width = 0;
+    canvas.height = 0;
+
+    if (!thumb || !thumb.startsWith('data:image/')) return '';
+    return thumb;
+  } catch (error) {
+    return '';
+  }
+};
+
+/** 降级方案：new Image + drawImage（老环境或 bitmap 失败时） */
+const makeThumbnailFallback = (dataUrl) => {
   return new Promise((resolve) => {
     const img = new Image();
     img.onload = () => {
