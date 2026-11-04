@@ -1191,8 +1191,18 @@ export const segmentCharacters = async (imageSrc, options = {}) => {
   // 通常宽高都明显偏小。
   // 因此：高度偏小但宽度正常的，判定为「笔画简单的字」并保留。
   if (usable.length >= 5) {
-    const medianW = median(usable.map((box) => box.width));
-    const medianH = median(usable.map((box) => box.height));
+    // 用 75 分位而不是中位数作为「正常字」基准。
+    // 原因：印章、装饰纹样会切成大量碎块（实测 t8 有 129/149 个是 12x16 碎块），
+    // 把中位数拉到碎块的尺寸，导致碎片过滤完全失效。
+    // 75 分位落在正常字一侧，不受碎块数量影响。
+    const percentile = (arr, p) => {
+      if (arr.length === 0) return 0;
+      const sorted = [...arr].sort((a, b) => a - b);
+      return sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * p))];
+    };
+    // 90 分位：碎块占比极高时（如 129/149）75 分位仍落在碎块区间
+    const medianW = percentile(usable.map((box) => box.width), 0.9);
+    const medianH = percentile(usable.map((box) => box.height), 0.9);
     // 图片尺寸（原图坐标），用于判断「贴边」
     const imageW = W / scale;
     const imageH = H / scale;
