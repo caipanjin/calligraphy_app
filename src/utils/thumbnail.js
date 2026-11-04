@@ -36,6 +36,12 @@ export const makeThumbnail = (dataUrl) => {
         const w = Math.max(1, Math.round(naturalW * ratio));
         const h = Math.max(1, Math.round(naturalH * ratio));
 
+        // 尺寸异常（解码失败或极端小图）直接回退原图，避免生成 1x1 的黑块
+        if (w < 8 || h < 8) {
+          resolve(dataUrl);
+          return;
+        }
+
         const canvas = document.createElement('canvas');
         canvas.width = w;
         canvas.height = h;
@@ -44,6 +50,11 @@ export const makeThumbnail = (dataUrl) => {
           resolve(dataUrl);
           return;
         }
+
+        // 先铺白底再画图：JPEG 不支持透明通道，透明区域会被编码成纯黑
+        // （实测 PNG 带透明背景的字帖缩略图会变成一片黑）。
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, w, h);
         ctx.drawImage(img, 0, 0, w, h);
 
         // JPEG 0.75：缩略图体积约 15~30KB，视觉上足够清晰
@@ -51,6 +62,12 @@ export const makeThumbnail = (dataUrl) => {
         // 及时释放 canvas 占用的内存
         canvas.width = 0;
         canvas.height = 0;
+
+        // 生成结果为空或异常时回退原图
+        if (!thumb || !thumb.startsWith('data:image/')) {
+          resolve(dataUrl);
+          return;
+        }
 
         cache.set(dataUrl, thumb);
         resolve(thumb);
