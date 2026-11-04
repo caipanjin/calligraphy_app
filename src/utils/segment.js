@@ -776,6 +776,14 @@ const normalizeColumnCounts = (boxes, columnRanges, layout) => {
  * 无格自由书写时，左右结构的字（如「氵」+主体）中间会有明显空隙，
  * 投影会把它们切成两块。判据是空隙宽度相对相邻块平均宽度的比例：
  * 实测同一字的部件间隙约 0.14~0.15，独立字之间 >=0.34，取 0.25 作分界。
+ *
+ * 补充判据（仅竖排、已知列宽时生效）：
+ * 上半是「一横」、下半是主体（如「石」「百」「夏」）的字，横与主体之间
+ * 只有细撇相连，投影会把它判成字间空白，形成「极扁块 + 主体块」。
+ * 原判据的间隙上限按「两块平均高度」算，扁块把基准拉低，导致合并不了
+ * （实测：扁块 34、主体 97、间隙 36，上限仅 16.4）。
+ * 因此改用列宽作基准，但必须同时满足「合并后总高仍不超过一个字高」，
+ * 否则会把上一个字与下一个字的起笔横误并成一个字。
  */
 export const mergeSplitGlyphs = (bands, threshold = 0.25, referenceSize = 0) => {
   if (bands.length < 2) return bands;
@@ -794,7 +802,21 @@ export const mergeSplitGlyphs = (bands, threshold = 0.25, referenceSize = 0) => 
     const normalSize = referenceSize > 0 ? referenceSize : averageSize;
     const looksLikeFragment = smaller < normalSize * 0.75;
 
-    if (looksLikeFragment && averageSize > 0 && gap < averageSize * threshold) {
+    const defaultMerge = looksLikeFragment && averageSize > 0 && gap < averageSize * threshold;
+
+    // 原判据合不了、且列宽已知时，只 rescue「扁部件 + 主体」这一种情形。
+    // 四重限制：非简单笔画字 / 至少一块明显偏扁 / 间隙小于列宽 25% /
+    // 合并后总高不超过列宽 1.3 倍。任何一条不满足都保持原样，避免误合并。
+    let flatFragmentMerge = false;
+    if (!defaultMerge && referenceSize > 0 && !previous.simpleStroke && !current.simpleStroke) {
+      const totalHeight = current.end - previous.start;
+      flatFragmentMerge =
+        smaller < referenceSize * 0.45 &&
+        gap >= 0 && gap < referenceSize * threshold &&
+        totalHeight <= referenceSize * 1.3;
+    }
+
+    if (defaultMerge || flatFragmentMerge) {
       previous.end = current.end;
     } else {
       merged.push({ ...current });

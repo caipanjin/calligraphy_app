@@ -195,6 +195,97 @@ check('竖排：两个正常字之间不合并', () => {
   assert.equal(out.length, 2);
 });
 
+// ——「石」字横画被误切成独立字的实测回归（996x2203 字帖，分析图 723x1600）——
+// 最右列列宽 178：706-899「有」/ 935-969「石」的一横 /
+// 1005-1102「石」的撇+口 / 1154-1306「穴」
+check('竖排：「石」的一横与主体合并，且不吞并上下相邻字', () => {
+  const out = mergeSplitGlyphs(
+    [
+      { start: 706, end: 899 },
+      { start: 935, end: 969 },
+      { start: 1005, end: 1102 },
+      { start: 1154, end: 1306 }
+    ],
+    0.25,
+    178
+  );
+  assert.deepEqual(
+    out.map((band) => [band.start, band.end]),
+    [[706, 899], [935, 1102], [1154, 1306]]
+  );
+});
+
+check('竖排：上一个字 + 下一个字起笔横不误合并（总高超过一个字）', () => {
+  // 合并后总高 263 > 178 × 1.3，必须保持两块
+  const out = mergeSplitGlyphs(
+    [{ start: 0, end: 193 }, { start: 229, end: 263 }],
+    0.25,
+    178
+  );
+  assert.equal(out.length, 2);
+});
+
+check('竖排：独立的「一」字（simpleStroke）不被并入相邻字', () => {
+  const out = mergeSplitGlyphs(
+    [{ start: 0, end: 9, simpleStroke: true }, { start: 45, end: 200 }],
+    0.25,
+    178
+  );
+  assert.equal(out.length, 2);
+});
+
+check('竖排：列宽未知时保持原有判据（不扩大合并范围）', () => {
+  const out = mergeSplitGlyphs(
+    [{ start: 0, end: 34 }, { start: 70, end: 167 }],
+    0.25,
+    0
+  );
+  assert.equal(out.length, 2);
+});
+
+check('竖排：密集排列的两个正常字仍不合并', () => {
+  const out = mergeSplitGlyphs(
+    [{ start: 0, end: 150 }, { start: 190, end: 350 }],
+    0.25,
+    178
+  );
+  assert.equal(out.length, 2);
+});
+
+// —— 含两个独立「一」的方格楷书《马说》实测回归（762x1280，分析尺寸同原图）——
+// 列宽 41：「粟」190-295 /「一」320-329 /「石」367-403（右数第 4 列）
+// 列宽 42：「者」986-1032 /「一」1064-1072 /「食」1103-1153（右数第 3 列）
+// 这两个「一」是简单笔画字，绝不能被并入「石」「食」；且间隙远大于合并上限，
+// 即使 simpleStroke 标记因故缺失，也不应合并（双重保险）。
+check('竖排：方格字帖里两个独立的「一」保持独立（真实数据）', () => {
+  const cases = [
+    {
+      width: 41,
+      bands: [
+        { start: 190, end: 295 },
+        { start: 320, end: 329, simpleStroke: true },
+        { start: 367, end: 403 }
+      ]
+    },
+    {
+      width: 42,
+      bands: [
+        { start: 986, end: 1032 },
+        { start: 1064, end: 1072, simpleStroke: true },
+        { start: 1103, end: 1153 }
+      ]
+    }
+  ];
+  cases.forEach(({ width, bands }) => {
+    const marked = mergeSplitGlyphs(bands, 0.25, width);
+    assert.equal(marked.length, 3);
+    // 反事实：去掉标记后，间隙与「合并后总高」两条仍应拦住
+    const plain = bands.map(({ start, end }) => ({ start, end }));
+    const unmarked = mergeSplitGlyphs(plain, 0.25, width);
+    assert.equal(unmarked.length, 3);
+  });
+});
+
 check('格线检测：识别出全格（列+行）', () => {
   const W = 400;
   const H = 500;
