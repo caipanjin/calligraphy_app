@@ -1,5 +1,4 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Magnifier } from 'react-image-magnifiers';
 import {
   FaChevronLeft,
   FaChevronUp,
@@ -26,6 +25,7 @@ import {
   PRACTICE_THRESHOLD_MS
 } from '../utils/practiceStore';
 import { hashImageData } from '../utils/imageHash';
+import { makeThumbnail } from '../utils/thumbnail';
 import { segmentCharacters } from '../utils/segment';
 
 // 缩放因子
@@ -132,6 +132,8 @@ const PracticeView = ({
             height: probe.naturalHeight || probe.height
           });
         }
+        // 释放解码后的位图，避免与切分/放大镜的副本同时驻留内存
+        probe.src = '';
       } catch (error) {
         /* 尺寸拿不到时网格不渲染，不影响其他功能 */
       }
@@ -818,12 +820,12 @@ const PracticeView = ({
                 : undefined
             }
           >
-            <Magnifier
-              imageSrc={image}
-              largeImageSrc={image}
-              imageAlt="字帖"
-              className="stage-image"
-            />
+            {/* 用普通 img 而不是 Magnifier：
+                Magnifier 会同时解码 imageSrc 和 largeImageSrc（同一张大图的
+                两份副本），iOS 上 4000x4500 的图直接多占 74MB，
+                是「App 被系统因内存不足杀掉」的主因之一。
+                移动端本来就用双指缩放，悬停放大并无必要。 */}
+            <img src={image} alt="字帖" className="stage-image" decoding="async" />
             {savedBoxes && savedBoxes.length > 0 ? (
               <div className="stage-grid">
                 {naturalSize.width > 0 && savedBoxes.map((box, index) => {

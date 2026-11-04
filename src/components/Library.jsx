@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
+import { makeThumbnails } from '../utils/thumbnail';
 import { FaPlus, FaEllipsisH, FaFeatherAlt, FaImages, FaLink } from 'react-icons/fa';
 
 /** 最近图片列表上限 */
@@ -21,6 +22,18 @@ const formatSize = (bytes) => {
  * 字帖库：网格卡片 + 添加入口 + 空状态
  */
 const Library = ({ images, currentImage, onOpen, onRequestDelete, onPickFiles, progressMap = {}, onImport }) => {
+  // 缩略图：避免字帖库一次性解码所有原图（20 张大图会直接 OOM）
+  const [thumbs, setThumbs] = useState(() => new Map());
+  useEffect(() => {
+    let cancelled = false;
+    makeThumbnails(images.map((item) => item.url)).then((map) => {
+      if (!cancelled) setThumbs(map);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [images]);
+
   return (
     <>
       {images.length === 0 ? (
@@ -70,7 +83,12 @@ const Library = ({ images, currentImage, onOpen, onRequestDelete, onPickFiles, p
                     onClick={() => onOpen(index)}
                     aria-label={`打开第 ${index + 1} 张字帖`}
                   >
-                    <img src={item.url} alt="" />
+                    <img
+                      src={thumbs.get(item.url) || item.url}
+                      alt=""
+                      loading="lazy"
+                      decoding="async"
+                    />
                     {isCurrent && <span className="poster-card__badge">临摹中</span>}
                   </button>
                   <div className="poster-card__meta">
