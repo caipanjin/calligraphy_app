@@ -10,9 +10,15 @@
 
 ### 字帖库
 
-- 上传字帖图片（JPG / PNG / GIF / WebP），最多保留 **20 张**
-- 卡片显示缩略图、上传日期、体积、**练习进度条**（已练字数 / 总字数）
-- 删除单张或清空全部（同时清理切分缓存与练习记录）
+- **一本字帖 = 多张页图**：一次选中多张照片就合成一本可翻页的字帖，之后还能继续加页
+- 最多 **20 本 / 每本 30 页**，一次最多选 20 张；支持重命名、删单页、删整本、清空全部
+- 卡片显示封面缩略图、名称、页数、体积、**练习进度条**（各页已练字数之和 / 总字数）
+- 打开字帖后底部列出**本字帖**所有页的缩略图（进入可视区才按需读，240px 小图），
+  左右滑动翻页；不同字帖之间的页互不关联
+- **关闭字帖（返回字帖库）会释放该字帖在内存里的所有内容**：当前页原图、选中单字、
+  切分面板与缩略图缓存全部清空，磁盘数据与「上次临摹到哪一页」保留，重开自动恢复
+- 删除整本字帖不清掉按图片内容哈希存的切分/练习记录 —— 同一张图若在别的字帖里，
+  两边的进度共享；孤儿记录由「清空全部字帖」统一回收
 
 ### 自动切字（投影法）
 
@@ -113,15 +119,26 @@
   —— 字距密集的字帖上，只按列宽比例扩展会吞并邻字
 - 上下扩展分别用 `gapUp` / `gapDown`，避免末字被上方空隙限制
 
-### 数据存储（IndexedDB，版本 4）
+### 数据存储（IndexedDB，版本 5）
 
 | Store | 键 | 内容 |
 |---|---|---|
-| `images` | `current` / `recent_N` | 字帖图片（data URL）|
+| `albums` | `album_x` | 字帖元数据：标题、时间戳、封面小图、各页 `{id, hash, size, addedAt}`；**不含原图** |
+| `pages` | `page_x` | 单页完整 base64（`{id, albumId, dataUrl}`），只在打开该页时单条读取 |
+| `thumbs` | `page_x` | 240px 缩略图，分页条进入可视区才按需读取 |
+| `meta` | `current` | 续练指针 `{albumId, pageId}`，关闭字帖后仍保留 |
 | `segmentations` | `{hash}:{layout}:{grid\|free}[:manual]` | 切分框、版面、单字调整、算法版本 |
 | `segmentationSettings` | 图片哈希 | 版面模式、是否带格子线 |
 | `practiceRecords` | `{hash}:{字索引}` | 练习次数、时间 |
 | `practiceDaily` | `YYYY-MM-DD` | 每日练习汇总 |
+
+**内存纪律**：字帖库只读 `albums` 元数据，绝不把 `pages` 的完整 base64 放进 React state；
+切分 / 练习记录仍按「图片内容哈希」寻址，与字帖 id 无关，所以两本字帖放同一张图会共享进度。
+缩略图在导入时生成并落盘（`buildThumbnail` 会挡掉「生成失败却回退成原图」的情况），
+模块级缩略图缓存也改用图片哈希作 key，不再强引用整串 base64。
+
+**v4 → v5 是清空重建**：升级时删除旧 `images` store 并清空遗留的切分/练习缓存，
+App 会提示重新导入，旧字帖与旧练习记录不迁移。全新安装只建表、不清理。
 
 **`boxes` 是切分框的唯一数据源**：单字页的缩放/位移调整会直接写回切分框
 （并打 `adjusted` 标记，后续进入不再额外加 padding）。
@@ -159,7 +176,7 @@
 ```bash
 npm install --legacy-peer-deps      # react-image-magnifiers 的 peer 依赖需放宽
 npm run dev                          # 开发服务器（端口 5199）
-npm test                             # 178 项单元测试
+npm test                             # 205 项单元测试
 npm run build                        # 生产构建
 ```
 
@@ -185,8 +202,13 @@ node scripts/test-segment-version.mjs    # 缓存算法版本 18 项
 node scripts/test-practice.mjs           # 练习记录 7 项
 node scripts/test-wechat.mjs             # 公众号提取 24 项
 node scripts/test-clipboard.mjs          # 剪贴板 12 项
+node scripts/test-album-store.mjs        # 多页字帖数据层 / 进度汇总 / 释放断言 27 项
 node scripts/test-segment-fixtures.mjs   # 真实图 golden 快照 10 项
 ```
+
+`test-album-store.mjs` 直接 import `albumStore.js`，用内存 IndexedDB mock 跑建帖、加页、
+删页、删帖、改名、续练指针与 v4→v5 清空重建；末尾的静态断言守住「返回字帖库必须
+`setImage(null)` + `clearThumbnailCache()`」「列表绝不 `getAll(pages)`」「缩略图不挂原图」。
 
 ### 真实图 golden 夹具
 
@@ -214,16 +236,18 @@ node scripts/test-segment-fixtures.mjs   # 真实图 golden 快照 10 项
 
 ```
 src/
-  App.jsx                  应用主体：状态、路由、存储、导入
+  App.jsx                  应用主体：状态、路由、存储、导入、关闭释放
   index.css                设计令牌与全部样式
   components/
-    Library.jsx            字帖库（卡片、进度条）
-    PracticeView.jsx       临摹页（图片模式 + 单字模式）
+    Library.jsx            字帖库（多页卡片、进度条、重命名/删除）
+    PracticeView.jsx       临摹页（图片模式 + 单字模式 + 本字帖分页条）
     SegmentSheet.jsx       切分面板（拖动、切线、加框、撤销）
     ImportSheet.jsx        公众号导入（粘贴链接、图片选择）
     ClipboardBanner.jsx    剪贴板导入提示条
     SettingsView.jsx       设置页（主题、统计、开关）
   utils/
+    albumStore.js          多页字帖数据层（albums/pages/thumbs/meta + v5 升级）
+    albumProgress.js       字帖库进度汇总（两张小表各读一次）
     segment.js             切分算法核心
     boxEdit.js             框编辑（增删合并拆分、平移缩放、本列切线）
     inkProfile.js          本列行投影低谷 → 候选切线（只做建议）
@@ -234,6 +258,7 @@ src/
     clipboardDetect.js     剪贴板内容检测与分类
     charNav.js             无切分时的相邻字推算
     imageHash.js           图片哈希（缓存键）
+    thumbnail.js           240px 缩略图生成（缓存按哈希，失败不外泄原图）
 
 openspec/changes/          各轮改动的设计记录与踩坑总结
 scripts/                   单元测试、夹具生成与 golden 快照
@@ -257,11 +282,13 @@ docs/screens/              界面截图
 - **微信抓取有频率限制**：短时间多次请求会被限流，需等待 1~2 分钟
 - **密集粘连字帖切分不准**：字与字连笔时投影法无法可靠分开（如行草），需在编辑态用
   「本列切线 / 候选线」逐字修正；无格字帖的字位错落不做自动推断
-- **iOS 大图仍可能触发内存终止**：字帖以完整 base64 常驻内存（最多 20 张），临摹页与
-  切分面板又会各持一份原图解码位图。已做的控制：临时 `Image` / canvas 用完即释放、
-  候选线复用切分算出的掩码（不再二次解码原图）、字帖库只渲染 240px 缩略图。
-  4000px 级超大图仍建议少量导入；进一步降常驻需把 IndexedDB 改成「只存元数据、
-  按需读原图」（涉及 DB 版本迁移），尚未实施
+- **iOS 超大图仍可能触发内存终止**：已把常驻基线从「最多 20 张完整 base64」改成
+  「只读字帖元数据 + 最多 1 份当前页原图」，并做到临时 `Image` / canvas 用完即释放、
+  候选线复用切分掩码、缩略图落盘且按需读取、关闭字帖清空全部内存引用。
+  但 4000px 级超大图在「打开页 + 切分面板」时仍会同时存在两份解码位图，
+  建议少量导入并用 Instruments 复测真机峰值
+- **指针捕获与触屏手柄命中区尚未做真机点按验证**：需在 `npm run ios:copy` 后实测
+  拖动、八向手柄与本列切线
 - **「用其他应用打开」列表可能不含本应用**：微信的筛选规则不透明，建议用「复制链接 → 粘贴导入」
 - **iOS 剪贴板授权弹窗**：每次读取剪贴板 iOS 都会弹「允许粘贴」，可在
   设置 → 应用 → 从其他 App 粘贴 → 改为「允许」后不再提示

@@ -1,16 +1,7 @@
-import React, { useEffect, useState } from 'react';
-import { makeThumbnails } from '../utils/thumbnail';
-import { FaPlus, FaEllipsisH, FaFeatherAlt, FaImages, FaLink } from 'react-icons/fa';
-
-/** 最近图片列表上限 */
-export const MAX_STICKERS = 20;
-
-const formatDate = (timestamp) => {
-  if (!timestamp) return '';
-  const date = new Date(timestamp);
-  if (Number.isNaN(date.getTime())) return '';
-  return `${date.getMonth() + 1}月${date.getDate()}日`;
-};
+import React from 'react';
+import { FaPlus, FaEllipsisH, FaPen, FaFeatherAlt, FaImages, FaLink, FaTimes } from 'react-icons/fa';
+import { sumAlbumProgress } from '../utils/albumProgress';
+import { MAX_ALBUMS, MAX_PAGES_PER_ALBUM } from '../utils/albumStore';
 
 const formatSize = (bytes) => {
   if (!bytes) return '';
@@ -19,44 +10,55 @@ const formatSize = (bytes) => {
 };
 
 /**
- * 字帖库：网格卡片 + 添加入口 + 空状态
+ * 字帖库：一本字帖 = 多张页图。
+ * 这里只渲染封面缩略图（240px 小图，随字帖元数据一起从 IndexedDB 读出），
+ * 完整原图只存在 pages store，打开某本字帖时才单条读取。
  */
-const Library = ({ images, currentImage, onOpen, onRequestDelete, onPickFiles, progressMap = {}, onImport }) => {
-  // 缩略图：避免字帖库一次性解码所有原图（20 张大图会直接 OOM）
-  const [thumbs, setThumbs] = useState(() => new Map());
-  useEffect(() => {
-    let cancelled = false;
-    makeThumbnails(images.map((item) => item.url)).then((map) => {
-      if (!cancelled) setThumbs(map);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [images]);
+const Library = ({
+  albums = [],
+  lastAlbumId = null,
+  progressMap = {},
+  notice = '',
+  onDismissNotice,
+  onOpen,
+  onRequestDelete,
+  onRequestRename,
+  onPickFiles,
+  onImport
+}) => {
+  const totalSize = (album) =>
+    (album.pages || []).reduce((sum, page) => sum + (page.size || 0), 0);
 
   return (
     <>
-      {images.length === 0 ? (
+      {notice && (
+        <div className="library-notice">
+          <span>{notice}</span>
+          <button onClick={onDismissNotice} aria-label="关闭提示">
+            <FaTimes size={12} />
+          </button>
+        </div>
+      )}
+
+      {albums.length === 0 ? (
         <div className="empty-state">
-          <div className="empty-state__seal" aria-hidden="true">
-            帖
-          </div>
+          <div className="empty-state__seal" aria-hidden="true">帖</div>
           <h2 className="empty-state__title">还没有字帖</h2>
           <p className="empty-state__desc">
-            上传一张字帖照片或扫描件，
+            一次选中多张字帖照片，
             <br />
-            点选任意单字即可放大临摹。
+            它们会合成一本可翻页的字帖。
           </p>
           <button className="btn btn--primary" onClick={onPickFiles}>
             <FaPlus />
-            上传字帖
+            新建字帖
           </button>
           <button className="btn btn--ghost" style={{ marginTop: 10 }} onClick={onImport}>
             <FaLink size={13} />
             从公众号导入
           </button>
           <p className="section-head__hint" style={{ marginTop: 14 }}>
-            支持 JPG / PNG / WebP，单次最多 {MAX_STICKERS} 张
+            一次最多 {MAX_ALBUMS} 本 / 每本最多 {MAX_PAGES_PER_ALBUM} 页
           </p>
         </div>
       ) : (
@@ -64,45 +66,46 @@ const Library = ({ images, currentImage, onOpen, onRequestDelete, onPickFiles, p
           <div className="section-head">
             <h2 className="section-head__title">字帖</h2>
             <span className="section-head__hint">
-              {images.length} / {MAX_STICKERS}
+              {albums.length} / {MAX_ALBUMS} 本
             </span>
           </div>
 
           <div className="library-grid">
-            {images.map((item, index) => {
-              const isCurrent = item.url === currentImage;
-              const date = formatDate(item.addedAt);
-              const progress = progressMap[item.url];
+            {albums.map((album) => {
+              const progress = sumAlbumProgress(album, progressMap);
+              const pageCount = album.pages ? album.pages.length : 0;
               return (
                 <article
-                  key={`${item.url.slice(-24)}-${index}`}
-                  className={`poster-card${isCurrent ? ' poster-card--current' : ''}`}
+                  key={album.id}
+                  className={`poster-card${album.id === lastAlbumId ? ' poster-card--current' : ''}`}
                 >
                   <button
                     className="poster-card__media"
-                    onClick={() => onOpen(index)}
-                    aria-label={`打开第 ${index + 1} 张字帖`}
+                    onClick={() => onOpen(album.id)}
+                    aria-label={`打开字帖 ${album.title}`}
                   >
-                    <img
-                      src={thumbs.get(item.url) || item.url}
-                      alt=""
-                      loading="lazy"
-                      decoding="async"
-                    />
-                    {isCurrent && <span className="poster-card__badge">临摹中</span>}
+                    {album.coverThumb ? (
+                      <img src={album.coverThumb} alt="" loading="lazy" decoding="async" />
+                    ) : (
+                      <span className="poster-card__placeholder" aria-hidden="true">帖</span>
+                    )}
+                    <span className="poster-card__count">{pageCount} 页</span>
+                    {album.id === lastAlbumId && (
+                      <span className="poster-card__badge">上次临摹</span>
+                    )}
                   </button>
                   <div className="poster-card__meta">
-                    <div style={{ minWidth: 0 }}>
-                      <div className="poster-card__name">
-                        {date ? `${date} 上传` : `字帖 ${String(index + 1).padStart(2, '0')}`}
-                      </div>
-                      <div className="section-head__hint">{formatSize(item.size)}</div>
-                      {progress && progress.total > 0 && (
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <div className="poster-card__name">{album.title || '未命名字帖'}</div>
+                      <div className="section-head__hint">{formatSize(totalSize(album))}</div>
+                      {progress.total > 0 && (
                         <div className="poster-progress">
                           <div className="poster-progress__bar">
                             <span
                               className="poster-progress__fill"
-                              style={{ width: `${Math.round((progress.practiced / progress.total) * 100)}%` }}
+                              style={{
+                                width: `${Math.min(100, Math.round((progress.practiced / progress.total) * 100))}%`
+                              }}
                             />
                           </div>
                           <span className="poster-progress__text">
@@ -111,22 +114,31 @@ const Library = ({ images, currentImage, onOpen, onRequestDelete, onPickFiles, p
                         </div>
                       )}
                     </div>
-                    <button
-                      className="poster-card__more"
-                      onClick={() => onRequestDelete(index)}
-                      aria-label="删除这张字帖"
-                    >
-                      <FaEllipsisH size={14} />
-                    </button>
+                    <div className="poster-card__actions">
+                      <button
+                        className="poster-card__more"
+                        onClick={() => onRequestRename(album)}
+                        aria-label="重命名字帖"
+                      >
+                        <FaPen size={12} />
+                      </button>
+                      <button
+                        className="poster-card__more"
+                        onClick={() => onRequestDelete(album.id)}
+                        aria-label="删除字帖"
+                      >
+                        <FaEllipsisH size={14} />
+                      </button>
+                    </div>
                   </div>
                 </article>
               );
             })}
 
-            {images.length < MAX_STICKERS && (
+            {albums.length < MAX_ALBUMS && (
               <button className="add-card" onClick={onPickFiles}>
                 <FaPlus />
-                添加字帖
+                新建字帖
               </button>
             )}
 
@@ -143,13 +155,13 @@ const Library = ({ images, currentImage, onOpen, onRequestDelete, onPickFiles, p
             <div className="settings-row">
               <FaFeatherAlt size={15} style={{ color: 'var(--accent)', flexShrink: 0 }} />
               <span className="settings-row__label" style={{ fontSize: 13, color: 'var(--ink-2)' }}>
-                打开字帖后可点「自动切字」整页切成单字，也可轻触任意位置手动选字。
+                打开字帖后底部会列出本字帖所有页，左右滑动翻页，也可继续加页。
               </span>
             </div>
             <div className="settings-row">
               <FaImages size={15} style={{ color: 'var(--accent)', flexShrink: 0 }} />
               <span className="settings-row__label" style={{ fontSize: 13, color: 'var(--ink-2)' }}>
-                字帖保存在本机，最多保留 {MAX_STICKERS} 张，长按或点击卡片右下角可删除。
+                不同字帖的页互不关联；返回字帖库会释放当前字帖的所有图片。
               </span>
             </div>
           </div>

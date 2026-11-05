@@ -30,7 +30,7 @@ import {
   PRACTICE_THRESHOLD_MS
 } from '../utils/practiceStore';
 import { hashImageData } from '../utils/imageHash';
-import { makeThumbnail } from '../utils/thumbnail';
+import { readThumb } from '../utils/albumStore';
 import { segmentCharacters } from '../utils/segment';
 
 // 缩放因子
@@ -67,6 +67,62 @@ const touchDistance = (touches) => {
 };
 
 /**
+ * 分页条里的按需缩略图。
+ * 只有滚进可视区（含 160px 预取）才从 IndexedDB 读那一条 240px 小图，
+ * 完整原图始终不参与渲染；组件卸载时本地 src 一并释放。
+ */
+const LazyPageThumb = ({ pageId, db }) => {
+  const holderRef = useRef(null);
+  const [src, setSrc] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    const holder = holderRef.current;
+    if (!holder) return undefined;
+
+    const load = () => {
+      if (!db || !pageId) return;
+      readThumb(db, pageId)
+        .then((thumb) => {
+          if (!cancelled && thumb) setSrc(thumb);
+        })
+        .catch(() => {});
+    };
+
+    if (typeof IntersectionObserver === 'undefined') {
+      load();
+      return () => {
+        cancelled = true;
+      };
+    }
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          observer.disconnect();
+          load();
+        }
+      },
+      { rootMargin: '160px' }
+    );
+    observer.observe(holder);
+    return () => {
+      cancelled = true;
+      observer.disconnect();
+    };
+  }, [db, pageId]);
+
+  return (
+    <span ref={holderRef} className="recent-strip__thumb">
+      {src ? (
+        <img src={src} alt="" decoding="async" />
+      ) : (
+        <span className="recent-strip__skeleton" aria-hidden="true" />
+      )}
+    </span>
+  );
+};
+
+/**
  * 临摹页：图片模式（点选单字）与单字模式（拖动 / 双指缩放 / 导航）
  */
 const PracticeView = ({
@@ -76,8 +132,13 @@ const PracticeView = ({
   setSelectedCharacter,
   onBack,
   onOpenSegment,
-  recentImages = [],
-  onSwitchImage,
+  // 当前字帖的页（只有 id/hash/size 元数据，不含原图）
+  pages = [],
+  activePageId = null,
+  pageIndex = 0,
+  onSwitchPage,
+  onAddPages,
+  onRequestDeletePage,
   db,
   gridVersion = 0,
   resumePractice = true
@@ -89,6 +150,8 @@ const PracticeView = ({
 
   const [dragging, setDragging] = useState(false);
   const [showDpad, setShowDpad] = useState(false);
+  // 分页条管理态：打开后每个缩略图右上角出现删除按钮
+  const [managing, setManaging] = useState(false);
   // 已保存的切分网格（打开字帖即加载，直接叠在图上点选）
   const [savedBoxes, setSavedBoxes] = useState(null);
   const [savedLayout, setSavedLayout] = useState('vertical');
@@ -867,18 +930,43 @@ const PracticeView = ({
             </div>
           </div>
 
-          {recentImages.length > 1 && (
-            <div className="recent-strip">
-              {recentImages.map((item, index) => (
-                <button
-                  key={index}
-                  className={`recent-strip__item${item.url === image ? ' recent-strip__item--active' : ''}`}
-                  onClick={() => onSwitchImage && onSwitchImage(item.url)}
-                  aria-label={`切换到第 ${index + 1} 张字帖`}
-                >
-                  <img src={item.url} alt="" />
-                </button>
-              ))}
+          {pages.length > 0 && (
+            <div className="album-pages">
+              <div className="album-pages__head">
+                <span className="album-pages__label">
+                  第 {pageIndex >= 0 ? pageIndex + 1 : 1} / {pages.length} 页
+                </span>
+                <div className="album-pages__tools">
+                  <button className="btn btn--text" onClick={() => setManaging((value) => !value)}>
+                    {managing ? '完成' : '管理'}
+                  </button>
+                  <button className="btn btn--text" onClick={onAddPages}>
+                    加页
+                  </button>
+                </div>
+              </div>
+              <div className="recent-strip">
+                {pages.map((page, index) => (
+                  <div className="recent-strip__wrap" key={page.id}>
+                    <button
+                      className={`recent-strip__item${page.id === activePageId ? ' recent-strip__item--active' : ''}`}
+                      onClick={() => onSwitchPage && onSwitchPage(page.id)}
+                      aria-label={`切换到第 ${index + 1} 页`}
+                    >
+                      <LazyPageThumb pageId={page.id} db={db} />
+                    </button>
+                    {managing && pages.length > 1 && (
+                      <button
+                        className="recent-strip__del"
+                        onClick={() => onRequestDeletePage && onRequestDeletePage(page.id)}
+                        aria-label={`删除第 ${index + 1} 页`}
+                      >
+                        ×
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
             </div>
           )}
 

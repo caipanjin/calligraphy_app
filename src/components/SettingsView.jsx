@@ -12,8 +12,9 @@ const THEME_OPTIONS = [
 const SettingsView = ({
   theme,
   onChangeTheme,
-  stickerCount,
-  maxStickers,
+  albumCount = 0,
+  pageCount = 0,
+  maxAlbums = 20,
   onClearAll,
   resumePractice = true,
   onChangeResume,
@@ -119,14 +120,18 @@ const SettingsView = ({
           <div className="settings-row">
             <span className="settings-row__label">已保存字帖</span>
             <span className="settings-row__value">
-              {stickerCount} / {maxStickers}
+              {albumCount} / {maxAlbums} 本
             </span>
           </div>
-          <button className="settings-row" onClick={onClearAll} disabled={stickerCount === 0}>
-            <FaTrashAlt size={14} style={{ color: stickerCount === 0 ? 'var(--ink-3)' : 'var(--accent)' }} />
+          <div className="settings-row">
+            <span className="settings-row__label">总页数</span>
+            <span className="settings-row__value">{pageCount} 页</span>
+          </div>
+          <button className="settings-row" onClick={onClearAll} disabled={albumCount === 0}>
+            <FaTrashAlt size={14} style={{ color: albumCount === 0 ? 'var(--ink-3)' : 'var(--accent)' }} />
             <span
               className="settings-row__label"
-              style={{ color: stickerCount === 0 ? 'var(--ink-3)' : 'var(--accent)' }}
+              style={{ color: albumCount === 0 ? 'var(--ink-3)' : 'var(--accent)' }}
             >
               清空全部字帖
             </span>

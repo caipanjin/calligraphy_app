@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import './index.css';
-import Library, { MAX_STICKERS } from './components/Library';
+import Library from './components/Library';
 import PracticeView from './components/PracticeView';
 import SegmentSheet from './components/SegmentSheet';
 import ImportSheet from './components/ImportSheet';
@@ -8,21 +8,34 @@ import ClipboardBanner from './components/ClipboardBanner';
 import { detectClipboardImport } from './utils/clipboardDetect';
 import SettingsView from './components/SettingsView';
 import Toast from './components/Toast';
-import { hashImageData } from './utils/imageHash';
 import { App as CapApp } from '@capacitor/app';
-import { deleteSegmentationByPrefix, clearSegmentations, readSegmentation } from './utils/segmentCache';
+import { clearSegmentations } from './utils/segmentCache';
 import { pickFirstUrl } from './utils/wechatArticle';
+import { clearAllPractice } from './utils/practiceStore';
+import { buildThumbnail, clearThumbnailCache } from './utils/thumbnail';
+import { buildProgressMap } from './utils/albumProgress';
 import {
-  deleteImagePractice,
-  clearAllPractice,
-  readImagePractice,
-  countPracticed
-} from './utils/practiceStore';
+  upgradeStores,
+  readAlbums,
+  readAll,
+  createAlbum,
+  addPages,
+  deletePage,
+  deleteAlbum,
+  renameAlbum,
+  readPage,
+  readCurrent,
+  saveCurrent,
+  clearCurrent,
+  clearAllAlbums,
+  MAX_ALBUMS,
+  MAX_PAGES_PER_ALBUM,
+  MAX_FILES_PER_IMPORT
+} from './utils/albumStore';
 import { FaImages, FaCog, FaPlus } from 'react-icons/fa';
 
 const DB_NAME = 'calligraphyImages';
-const DB_VERSION = 4;
-const STORE_NAME = 'images';
+const DB_VERSION = 5;
 const THEME_STORAGE_KEY = 'calligraphy:theme';
 const TOAST_DURATION = 2200;
 const SUPPORTED_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
@@ -44,7 +57,6 @@ const isValidImageDataUrl = (dataUrl) => {
   return Boolean(base64) && base64.length >= 100 && /^[A-Za-z0-9+/=]+$/.test(base64);
 };
 
-/** 把某张字帖提到列表最前，并裁剪到上限 */
 /** 估算 data URL 的字节大小（base64 长度 × 3/4） */
 const estimateDataUrlSize = (dataUrl) => {
   if (typeof dataUrl !== 'string') return 0;
@@ -53,15 +65,20 @@ const estimateDataUrlSize = (dataUrl) => {
   return Math.round((base64.length * 3) / 4);
 };
 
-const promoteRecent = (list, item) => {
-  const rest = list.filter((entry) => entry.url !== item.url);
-  return [item, ...rest].slice(0, MAX_STICKERS);
-};
-
 const App = () => {
   const [db, setDb] = useState(null);
+  // 字帖列表：只有元数据（id / 标题 / 各页 id·hash·size / 封面缩略图），
+  // 绝不把完整 base64 放进 React state。
+  const [albums, setAlbums] = useState([]);
+  // 当前页的完整 dataUrl：整个 App 运行期间最多只有这一份
   const [image, setImage] = useState(null);
-  const [recentImages, setRecentImages] = useState([]);
+  const [activeAlbumId, setActiveAlbumId] = useState(null);
+  const [activePageId, setActivePageId] = useState(null);
+  // 仅在内存中保存上次练到哪一页的指针（磁盘里另存一份用于重启恢复）
+  const [resumePointer, setResumePointer] = useState(null);
+  const [switching, setSwitching] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [notice, setNotice] = useState('');
   const [tab, setTab] = useState('library');
   const [mode, setMode] = useState('library');
   const [selectedCharacter, setSelectedCharacter] = useState(null);
@@ -69,19 +86,17 @@ const App = () => {
   const [showImport, setShowImport] = useState(false);
   // 从外部（微信「用其他应用打开」）传入的待导入链接
   const [importUrl, setImportUrl] = useState('');
-  // 剪贴板检测结果：{ kind: 'wechat'|'image'|'url', payload }
   const [clipboardHint, setClipboardHint] = useState(null);
-  // 已提示过的内容指纹，避免反复打扰
   const clipboardSeenRef = useRef('');
   const clipboardLastReadRef = useRef(0);
-  // 每张字帖的练习进度：{ [url]: { practiced, total } }
+  // 每页的练习进度：{ [pageId]: { practiced, total } }
   const [progressMap, setProgressMap] = useState({});
-  // 切分结果变更的版本号：切分面板改动后，临摹页据此重新读取已存网格
   const [gridVersion, setGridVersion] = useState(0);
-  const [deleteIndex, setDeleteIndex] = useState(null);
+  // { kind:'album', albumId } 或 { kind:'page', albumId, pageId }
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [renameTarget, setRenameTarget] = useState(null);
+  const [renameValue, setRenameValue] = useState('');
   const [toast, setToast] = useState('');
-  // 打开字帖时是否跳到上次练到的字（默认开启）
-  // 打开 App 时是否自动检测剪贴板（iOS 每次读取会弹系统授权，可关闭）
   const [clipboardWatch, setClipboardWatch] = useState(() => {
     try {
       return localStorage.getItem('calligraphy:clipwatch') !== 'off';
@@ -105,9 +120,13 @@ const App = () => {
   });
   const [headerScrolled, setHeaderScrolled] = useState(false);
 
-  const recentRef = useRef([]);
+  const albumsRef = useRef([]);
   const toastTimerRef = useRef(null);
   const fileInputRef = useRef(null);
+  // 记录这次选图是「新建字帖」还是「给某本字帖加页」
+  const fileTargetRef = useRef(null);
+  // 切页/开帖的异步读取令牌，避免快速连点时旧结果覆盖新结果
+  const switchTokenRef = useRef(0);
 
   /* ---------------- 轻提示 ---------------- */
 
@@ -121,7 +140,6 @@ const App = () => {
 
   const checkClipboard = useCallback(async () => {
     if (!clipboardWatch) return;
-    // 节流：iOS 每次读取剪贴板都会弹系统授权，避免短时间反复触发
     const now = Date.now();
     if (now - clipboardLastReadRef.current < 8000) return;
     clipboardLastReadRef.current = now;
@@ -129,34 +147,27 @@ const App = () => {
     try {
       const detected = await detectClipboardImport();
       if (!detected.kind) return;
-
-      // 同一份内容只提示一次，避免反复打扰
       const fingerprint = `${detected.kind}:${detected.payload.slice(0, 64)}`;
       if (clipboardSeenRef.current === fingerprint) return;
       clipboardSeenRef.current = fingerprint;
-
       setClipboardHint(detected);
     } catch (error) {
       // 剪贴板不可用（无权限 / 无手势）时静默跳过
     }
   }, [clipboardWatch]);
 
-  // 进入字帖库（含从设置页切回）时检测一次
   useEffect(() => {
     if (mode !== 'library' || tab !== 'library') return undefined;
     const timer = setTimeout(checkClipboard, 300);
     return () => clearTimeout(timer);
   }, [mode, tab, checkClipboard]);
 
-  // App 从后台回到前台时再检测（用户可能刚去微信复制了链接）
   useEffect(() => {
     let listener = null;
     const register = async () => {
       try {
         listener = await CapApp.addListener('appStateChange', (state) => {
-          if (state && state.isActive) {
-            setTimeout(checkClipboard, 400);
-          }
+          if (state && state.isActive) setTimeout(checkClipboard, 400);
         });
       } catch (error) {
         // Web 环境无该事件
@@ -174,7 +185,6 @@ const App = () => {
     let listener = null;
     let cancelled = false;
 
-    // 从各种形态里提取出公众号链接
     const handleIncomingUrl = (raw) => {
       if (!raw) return;
       const text = String(raw);
@@ -191,28 +201,22 @@ const App = () => {
 
     const register = async () => {
       try {
-        // App 已在运行时，监听后续打开
         listener = await CapApp.addListener('appUrlOpen', (event) => {
           handleIncomingUrl(event && event.url);
         });
-        // App 由链接冷启动时，取首次 URL
         const launch = await CapApp.getLaunchUrl();
-        if (!cancelled && launch && launch.url) {
-          handleIncomingUrl(launch.url);
-        }
+        if (!cancelled && launch && launch.url) handleIncomingUrl(launch.url);
       } catch (error) {
         // Web 环境没有该插件能力，忽略
       }
     };
 
     register();
-
     return () => {
       cancelled = true;
       if (listener && listener.remove) listener.remove();
     };
   }, [showToast]);
-
 
   useEffect(
     () => () => {
@@ -225,21 +229,18 @@ const App = () => {
 
   useEffect(() => {
     const media = window.matchMedia('(prefers-color-scheme: dark)');
-
     const apply = () => {
       const resolved = theme === 'auto' ? (media.matches ? 'dark' : 'light') : theme;
       document.documentElement.dataset.theme = resolved;
       const meta = document.querySelector('meta[name="theme-color"]');
       if (meta) meta.setAttribute('content', resolved === 'dark' ? '#14130f' : '#f4efe6');
     };
-
     apply();
     try {
       localStorage.setItem(THEME_STORAGE_KEY, theme);
     } catch (error) {
       /* 忽略隐私模式下的写入失败 */
     }
-
     if (theme !== 'auto') return undefined;
     media.addEventListener('change', apply);
     return () => media.removeEventListener('change', apply);
@@ -254,356 +255,386 @@ const App = () => {
     }
 
     let retryTimer = null;
+    let legacyCleared = false;
 
-    const request = indexedDB.open(DB_NAME, DB_VERSION);
-
-    request.onupgradeneeded = (event) => {
-      const database = event.target.result;
-      if (!database.objectStoreNames.contains(STORE_NAME)) {
-        database.createObjectStore(STORE_NAME, { keyPath: 'id' });
-      }
-      // 切分结果缓存（按图片哈希存储，避免每次重新计算）
-      if (!database.objectStoreNames.contains('segmentations')) {
-        database.createObjectStore('segmentations', { keyPath: 'id' });
-      }
-      // 每张字帖的用户设置（版面模式 / 是否带格子线）
-      if (!database.objectStoreNames.contains('segmentationSettings')) {
-        database.createObjectStore('segmentationSettings', { keyPath: 'id' });
-      }
-      // 练习记录：每个字练过几次（键 = 图片哈希:字索引）
-      if (!database.objectStoreNames.contains('practiceRecords')) {
-        database.createObjectStore('practiceRecords', { keyPath: 'id' });
-      }
-      // 每日练习汇总（键 = YYYY-MM-DD）
-      if (!database.objectStoreNames.contains('practiceDaily')) {
-        database.createObjectStore('practiceDaily', { keyPath: 'id' });
-      }
+    const handleSuccess = (database) => {
+      setDb(database);
+      readAlbums(database)
+        .then((list) => {
+          albumsRef.current = list;
+          setAlbums(list);
+          if (legacyCleared) {
+            setNotice('数据结构已升级为「一本字帖可含多页」，旧字帖已清空，请重新导入');
+          }
+        })
+        .catch(() => {
+          /* 读取失败时保持空列表，不阻塞界面 */
+        });
+      readCurrent(database)
+        .then((pointer) => setResumePointer(pointer || null))
+        .catch(() => {});
     };
 
-    request.onsuccess = (event) => setDb(event.target.result);
-
-    request.onerror = (event) => {
-      console.error('IndexedDB error:', event.target.error);
-      retryTimer = setTimeout(() => {
-        const retry = indexedDB.open(DB_NAME, DB_VERSION);
-        retry.onsuccess = (e) => setDb(e.target.result);
-      }, 1000);
+    const wire = (request) => {
+      request.onupgradeneeded = (event) => {
+        const cleared = upgradeStores(
+          event.target.result,
+          event.target.transaction,
+          event.oldVersion
+        );
+        if (cleared) legacyCleared = true;
+      };
+      request.onsuccess = (event) => handleSuccess(event.target.result);
+      request.onerror = (event) => {
+        console.error('IndexedDB error:', event.target.error);
+        if (!retryTimer) {
+          retryTimer = setTimeout(() => {
+            retryTimer = null;
+            wire(indexedDB.open(DB_NAME, DB_VERSION));
+          }, 1000);
+        }
+      };
+      request.onblocked = () => console.warn('IndexedDB connection blocked');
     };
 
-    request.onblocked = () => console.warn('IndexedDB connection blocked');
-
+    wire(indexedDB.open(DB_NAME, DB_VERSION));
     return () => {
       if (retryTimer) clearTimeout(retryTimer);
     };
   }, [showToast]);
 
-  useEffect(() => {
+  /* ---------------- 列表读取 ---------------- */
+
+  const refreshAlbums = useCallback(async () => {
     if (!db) return;
-    const transaction = db.transaction(STORE_NAME, 'readonly');
-    const store = transaction.objectStore(STORE_NAME);
-
-    const currentRequest = store.get('current');
-    currentRequest.onsuccess = () => {
-      if (currentRequest.result) setImage(currentRequest.result.url);
-    };
-
-    const listRequest = store.getAll();
-    listRequest.onsuccess = () => {
-      const items = listRequest.result
-        .filter((item) => item && item.id !== 'current' && item.url)
-        .sort((a, b) => String(a.id).localeCompare(String(b.id)))
-        .map((item) => ({ url: item.url, addedAt: item.addedAt, size: item.size }));
-      recentRef.current = items;
-      setRecentImages(items);
-    };
+    const list = await readAlbums(db);
+    albumsRef.current = list;
+    setAlbums(list);
   }, [db]);
 
-  /* ---------------- 列表持久化 ---------------- */
+  /** 进度：两张小表各 getAll 一次，全程不加载任何完整原图 */
+  const refreshProgress = useCallback(async () => {
+    if (!db) return;
+    try {
+      const [segmentations, practiceRecords] = await Promise.all([
+        readAll(db, 'segmentations'),
+        readAll(db, 'practiceRecords')
+      ]);
+      const pages = albumsRef.current.flatMap((album) => album.pages || []);
+      setProgressMap(buildProgressMap(pages, segmentations, practiceRecords));
+    } catch (error) {
+      /* 进度只是展示，读失败不影响使用 */
+    }
+  }, [db]);
 
-  const updateRecent = useCallback(
-    (next) => {
-      recentRef.current = next;
-      setRecentImages(next);
+  useEffect(() => {
+    if (mode !== 'library' || !db) return;
+    refreshProgress();
+  }, [mode, db, albums, gridVersion, refreshProgress]);
 
-      if (!db) return;
-      const transaction = db.transaction(STORE_NAME, 'readwrite');
-      const store = transaction.objectStore(STORE_NAME);
-      const keysRequest = store.getAllKeys();
-      keysRequest.onsuccess = () => {
-        keysRequest.result
-          .filter((key) => String(key).startsWith('recent_'))
-          .forEach((key) => store.delete(key));
-        next.forEach((item, index) => {
-          store.put({
-            id: `recent_${index}`,
-            url: item.url,
-            addedAt: item.addedAt,
-            size: item.size
+  /* ---------------- 打开 / 切页 / 关闭 ---------------- */
+
+  const activatePage = useCallback(
+    async (albumId, pageId) => {
+      if (!db || !albumId || !pageId) return false;
+      const token = ++switchTokenRef.current;
+      setSwitching(true);
+      try {
+        const page = await readPage(db, pageId);
+        if (token !== switchTokenRef.current) return false;
+        if (!page) {
+          setSwitching(false);
+          showToast('这一页读取失败');
+          return false;
+        }
+        setActiveAlbumId(albumId);
+        setActivePageId(pageId);
+        setImage(page.dataUrl);
+        setSelectedCharacter(null);
+        setShowSegment(false);
+        setMode('practice');
+        setResumePointer({ albumId, pageId });
+        saveCurrent(db, { albumId, pageId }).catch(() => {});
+        setSwitching(false);
+        window.scrollTo({ top: 0 });
+        return true;
+      } catch (error) {
+        if (token === switchTokenRef.current) {
+          setSwitching(false);
+          showToast('打开字帖失败');
+        }
+        return false;
+      }
+    },
+    [db, showToast]
+  );
+
+  const openAlbum = useCallback(
+    async (albumId, preferredPageId) => {
+      const album = albumsRef.current.find((item) => item.id === albumId);
+      if (!album || !album.pages || album.pages.length === 0) return;
+      const hasPreferred =
+        preferredPageId && album.pages.some((page) => page.id === preferredPageId);
+      const resumed =
+        resumePointer &&
+        resumePointer.albumId === albumId &&
+        album.pages.some((page) => page.id === resumePointer.pageId);
+      const pageId = hasPreferred
+        ? preferredPageId
+        : resumed
+          ? resumePointer.pageId
+          : album.pages[0].id;
+      await activatePage(albumId, pageId);
+    },
+    [activatePage, resumePointer]
+  );
+
+  const handleSwitchPage = useCallback(
+    async (pageId) => {
+      if (!pageId || pageId === activePageId || !activeAlbumId) return;
+      await activatePage(activeAlbumId, pageId);
+    },
+    [activatePage, activeAlbumId, activePageId]
+  );
+
+  /**
+   * 关闭字帖 = 返回字帖库。
+   * 这里把当前页完整 dataUrl、选中单字（内嵌一份原图）、切分面板、
+   * 缩略图缓存全部清掉；磁盘数据与续练指针保留，重开自动回到上次那一页。
+   */
+  const handleBackToLibrary = useCallback(() => {
+    switchTokenRef.current += 1;
+    setMode('library');
+    setSelectedCharacter(null);
+    setShowSegment(false);
+    setSwitching(false);
+    setImage(null);
+    setActiveAlbumId(null);
+    setActivePageId(null);
+    clearThumbnailCache();
+    refreshAlbums().catch(() => {});
+  }, [refreshAlbums]);
+
+  /* ---------------- 导入 ---------------- */
+
+  /**
+   * 把已解码的图片写进字帖。缩略图逐张串行生成，避免 N 张大图同时驻留。
+   * targetAlbumId 为空表示新建一本字帖，否则是给已有字帖加页。
+   */
+  const importDataUrls = useCallback(
+    async (items, targetAlbumId = null, message = '') => {
+      if (!db || !items || items.length === 0) return;
+      const target = targetAlbumId
+        ? albumsRef.current.find((album) => album.id === targetAlbumId)
+        : null;
+
+      if (target && target.pages.length + items.length > MAX_PAGES_PER_ALBUM) {
+        showToast(`一本字帖最多 ${MAX_PAGES_PER_ALBUM} 页`);
+        return;
+      }
+      if (!target && albumsRef.current.length >= MAX_ALBUMS) {
+        showToast(`最多保存 ${MAX_ALBUMS} 本字帖，请先删除一本`);
+        return;
+      }
+
+      setImporting(true);
+      try {
+        const pages = [];
+        for (const item of items) {
+          const thumb = await buildThumbnail(item.dataUrl);
+          pages.push({
+            dataUrl: item.dataUrl,
+            size: item.size || estimateDataUrlSize(item.dataUrl),
+            thumb
           });
-        });
-      };
-    },
-    [db]
-  );
+        }
 
-  const persistCurrent = useCallback(
-    (url) => {
-      if (!db) return;
-      const transaction = db.transaction(STORE_NAME, 'readwrite');
-      const store = transaction.objectStore(STORE_NAME);
-      if (url) store.put({ id: 'current', url });
-      else store.delete('current');
+        if (target) {
+          await addPages(db, target.id, pages);
+          await refreshAlbums();
+          showToast(message || `已添加 ${pages.length} 页`);
+        } else {
+          const album = await createAlbum(db, { pages });
+          await refreshAlbums();
+          showToast(message || `已新建字帖，共 ${pages.length} 页`);
+          await openAlbum(album.id, album.pages[0].id);
+        }
+      } catch (error) {
+        showToast('导入失败，请重试');
+      } finally {
+        setImporting(false);
+      }
     },
-    [db]
-  );
-
-  /* ---------------- 交互 ---------------- */
-
-  const openPractice = useCallback(
-    (url) => {
-      setImage(url);
-      setSelectedCharacter(null);
-      setShowSegment(false);
-      setMode('practice');
-      persistCurrent(url);
-      window.scrollTo({ top: 0 });
-    },
-    [persistCurrent]
-  );
-
-  const handleOpenSticker = useCallback(
-    (index) => {
-      const item = recentRef.current[index];
-      if (!item) return;
-      updateRecent(promoteRecent(recentRef.current, item));
-      openPractice(item.url);
-    },
-    [openPractice, updateRecent]
+    [db, openAlbum, refreshAlbums, showToast]
   );
 
   const handleUpload = useCallback(
-    async (files) => {
+    async (files, targetAlbumId = null) => {
       if (!files || files.length === 0) return;
-
-      if (files.length > MAX_STICKERS) {
-        showToast(`一次最多上传 ${MAX_STICKERS} 张`);
+      if (files.length > MAX_FILES_PER_IMPORT) {
+        showToast(`一次最多选择 ${MAX_FILES_PER_IMPORT} 张`);
         return;
       }
-
-      // 已满时明确提示，避免静默挤掉最旧的字帖
-      const remaining = MAX_STICKERS - recentRef.current.length;
-      if (remaining <= 0) {
-        showToast(`最多保留 ${MAX_STICKERS} 张字帖，请先删除一张再上传`);
-        return;
-      }
-      if (files.length > remaining) {
-        showToast(`还能添加 ${remaining} 张（上限 ${MAX_STICKERS} 张）`);
-        return;
-      }
-
       const valid = files.filter((file) => SUPPORTED_TYPES.includes(file.type));
       if (valid.length === 0) {
         showToast('请选择 JPG / PNG / GIF / WebP 图片');
         return;
       }
 
-      const loaded = [];
+      const items = [];
       for (const file of valid) {
         try {
           const dataUrl = await readFileAsDataUrl(file);
           if (!isValidImageDataUrl(dataUrl)) throw new Error('数据无效');
-          loaded.push({ url: dataUrl, addedAt: Date.now(), size: file.size });
+          items.push({ dataUrl, size: file.size });
         } catch (error) {
           showToast(`${file.name} 读取失败`);
         }
       }
-
-      if (loaded.length === 0) return;
-
-      let next = recentRef.current;
-      loaded.forEach((item) => {
-        next = promoteRecent(next, item);
-      });
-      updateRecent(next);
-
-      if (valid.length < files.length) {
-        showToast(`已跳过 ${files.length - valid.length} 个不支持的文件`);
-      } else {
-        showToast(loaded.length > 1 ? `已添加 ${loaded.length} 张字帖` : '字帖已添加');
-      }
-
-      openPractice(loaded[0].url);
+      if (items.length === 0) return;
+      await importDataUrls(items, targetAlbumId);
     },
-    [openPractice, showToast, updateRecent]
+    [importDataUrls, showToast]
   );
 
-  // 从公众号导入的图片（已是 data URL）
+  // 从公众号导入的图片（已是 data URL）：整批成为一本新字帖
   const handleImportImages = useCallback(
     async (items, options = {}) => {
       if (!items || items.length === 0) return;
-      let next = recentRef.current;
-      const imported = [];
-      for (const item of items) {
-        const entry = { url: item.url, addedAt: Date.now(), size: estimateDataUrlSize(item.url) };
-        next = promoteRecent(next, entry);
-        imported.push(entry);
-      }
-      updateRecent(next);
       setShowImport(false);
-      setImage(imported[imported.length - 1].url);
-      setSelectedCharacter(null);
-      setMode('practice');
-      persistCurrent(imported[imported.length - 1].url);
+      setImportUrl('');
+      const mapped = items.map((item) => ({
+        dataUrl: item.url,
+        size: estimateDataUrlSize(item.url)
+      }));
       const skipped = options && options.skipped ? options.skipped : 0;
-      showToast(
-        skipped > 0
-          ? `已导入 ${imported.length} 张，跳过 ${skipped} 张重复/干扰图`
-          : `已导入 ${imported.length} 张字帖`
+      await importDataUrls(
+        mapped,
+        null,
+        skipped > 0 ? `已导入 ${mapped.length} 页，跳过 ${skipped} 张重复/干扰图` : ''
       );
     },
-    [persistCurrent, showToast, updateRecent]
+    [importDataUrls]
   );
 
-  // 处理剪贴板导入：链接 → 打开导入面板；图片 → 直接存为字帖
   const handleClipboardImport = useCallback(async () => {
     if (!clipboardHint) return;
     const { kind, payload } = clipboardHint;
-
     if (kind === 'wechat' || kind === 'url') {
       setImportUrl(payload);
       setShowImport(true);
       setClipboardHint(null);
       return;
     }
-
     if (kind === 'image') {
-      // 图片是 data URL，直接走和文件上传一样的入库流程
-      const entry = { url: payload, addedAt: Date.now(), size: estimateDataUrlSize(payload) };
-      const next = promoteRecent(recentRef.current, entry);
-      updateRecent(next);
-      setImage(payload);
-      setSelectedCharacter(null);
-      setMode('practice');
-      persistCurrent(payload);
+      await importDataUrls(
+        [{ dataUrl: payload, size: estimateDataUrlSize(payload) }],
+        null,
+        '已从剪贴板导入字帖'
+      );
       setClipboardHint(null);
-      showToast('已从剪贴板导入字帖');
     }
-  }, [clipboardHint, persistCurrent, showToast, updateRecent]);
+  }, [clipboardHint, importDataUrls]);
 
-  const handlePickFiles = useCallback(() => {
+  const handlePickFiles = useCallback((targetAlbumId = null) => {
+    fileTargetRef.current = targetAlbumId;
     if (fileInputRef.current) fileInputRef.current.click();
   }, []);
 
   const handleFileInputChange = useCallback(
     (event) => {
       const files = Array.from(event.target.files || []);
+      const target = fileTargetRef.current;
+      fileTargetRef.current = null;
       event.target.value = '';
-      if (files.length > 0) handleUpload(files);
+      if (files.length > 0) handleUpload(files, target);
     },
     [handleUpload]
   );
 
-  const handleConfirmDelete = useCallback(() => {
-    const index = deleteIndex;
-    if (index === null) return;
-    const target = recentRef.current[index];
-    const next = recentRef.current.filter((_, itemIndex) => itemIndex !== index);
-    updateRecent(next);
-    setDeleteIndex(null);
+  /* ---------------- 删除 / 改名 ---------------- */
 
-    if (target) {
-      const imageHash = hashImageData(target.url);
-      deleteSegmentationByPrefix(db, imageHash);
-      deleteImagePractice(db, imageHash);
+  const handleConfirmDelete = useCallback(async () => {
+    const target = deleteTarget;
+    setDeleteTarget(null);
+    if (!target || !db) return;
+
+    if (target.kind === 'album') {
+      await deleteAlbum(db, target.albumId);
+      if (resumePointer && resumePointer.albumId === target.albumId) {
+        await clearCurrent(db).catch(() => {});
+        setResumePointer(null);
+      }
+      if (activeAlbumId === target.albumId) handleBackToLibrary();
+      await refreshAlbums();
+      showToast('字帖已删除');
+      return;
     }
 
-    if (target && target.url === image) {
-      setImage(null);
-      setSelectedCharacter(null);
-      setMode('library');
-      persistCurrent(null);
+    if (target.kind === 'page') {
+      const album = albumsRef.current.find((item) => item.id === target.albumId);
+      if (!album || album.pages.length <= 1) {
+        showToast('至少保留一页；若要移除请删除整本字帖');
+        return;
+      }
+      await deletePage(db, target.albumId, target.pageId);
+      await refreshAlbums();
+      if (activePageId === target.pageId) {
+        const updated = albumsRef.current.find((item) => item.id === target.albumId);
+        if (updated && updated.pages[0]) {
+          await openAlbum(target.albumId, updated.pages[0].id);
+        }
+      }
+      showToast('已删除这一页');
     }
-    showToast('已删除');
-  }, [deleteIndex, image, persistCurrent, showToast, updateRecent]);
+  }, [
+    deleteTarget,
+    db,
+    resumePointer,
+    activeAlbumId,
+    activePageId,
+    handleBackToLibrary,
+    refreshAlbums,
+    openAlbum,
+    showToast
+  ]);
 
-  const handleClearAll = useCallback(() => {
+  const handleConfirmRename = useCallback(async () => {
+    if (!renameTarget || !db) return;
+    const value = renameValue.trim();
+    if (!value) {
+      showToast('名称不能为空');
+      return;
+    }
+    await renameAlbum(db, renameTarget.albumId, value);
+    await refreshAlbums();
+    setRenameTarget(null);
+  }, [renameTarget, renameValue, db, refreshAlbums, showToast]);
+
+  const handleClearAll = useCallback(async () => {
+    await clearAllAlbums(db);
     clearSegmentations(db);
     clearAllPractice(db);
-    updateRecent([]);
+    clearThumbnailCache();
+    albumsRef.current = [];
+    setAlbums([]);
+    setProgressMap({});
     setImage(null);
-    setSelectedCharacter(null);
-    setMode('library');
-    persistCurrent(null);
-    showToast('已清空全部字帖');
-  }, [db, persistCurrent, showToast, updateRecent]);
-
-  const handleSwitchImage = useCallback(
-    (url) => {
-      if (!url || url === image) return;
-      setImage(url);
-      setSelectedCharacter(null);
-      persistCurrent(url);
-    },
-    [image, persistCurrent]
-  );
-
-  // 计算每张字帖的练习进度（已练字数 / 切分总字数）
-  const refreshProgress = useCallback(async () => {
-    if (!db) return;
-    const items = recentRef.current || [];
-    const next = {};
-    const variants = ['vertical:free', 'vertical:grid', 'auto:free', 'auto:grid'];
-
-    // 每张字帖并行处理：上限提到 20 后，串行会累积上百次 IndexedDB 往返
-    await Promise.all(
-      items.map(async (item) => {
-        const imageHash = hashImageData(item.url);
-
-        // 优先取手动调整结果，其次任意版面的自动结果。
-        // 这里刻意不做算法版本校验：进度分母只是个字数，
-        // 旧缓存过期时沿用旧值，好过让升级后所有字帖的分母突然变 0；
-        // 用户打开该字帖触发重算后，分母会自然更新。
-        let total = 0;
-        for (const variant of variants) {
-          const manual = await readSegmentation(db, `${imageHash}:${variant}:manual`);
-          if (manual && manual.boxes && manual.boxes.length > 0) {
-            total = manual.boxes.length;
-            break;
-          }
-        }
-        if (!total) {
-          for (const variant of variants) {
-            const auto = await readSegmentation(db, `${imageHash}:${variant}`);
-            if (auto && auto.boxes && auto.boxes.length > 0) {
-              total = auto.boxes.length;
-              break;
-            }
-          }
-        }
-
-        const records = await readImagePractice(db, imageHash);
-        next[item.url] = { practiced: countPracticed(records), total };
-      })
-    );
-
-    setProgressMap(next);
-  }, [db]);
-
-  // 进入字帖库或列表变化时刷新进度
-  useEffect(() => {
-    if (mode !== 'library' || !db) return;
-    refreshProgress();
-  }, [mode, db, recentImages, refreshProgress]);
-
-  const handleBackToLibrary = useCallback(() => {
-    setMode('library');
+    setActiveAlbumId(null);
+    setActivePageId(null);
+    setResumePointer(null);
     setSelectedCharacter(null);
     setShowSegment(false);
-  }, []);
+    setMode('library');
+    showToast('已清空全部字帖');
+  }, [db, showToast]);
 
-  const currentIndex = recentImages.findIndex((item) => item.url === image);
-  const practiceTitle =
-    currentIndex >= 0 ? `字帖 ${String(currentIndex + 1).padStart(2, '0')}` : '临摹';
+  /* ---------------- 派生状态 ---------------- */
+
+  const activeAlbum = albums.find((album) => album.id === activeAlbumId) || null;
+  const pageList = activeAlbum && Array.isArray(activeAlbum.pages) ? activeAlbum.pages : [];
+  const pageIndex = pageList.findIndex((page) => page.id === activePageId);
+  const totalPages = albums.reduce((sum, album) => sum + (album.pages ? album.pages.length : 0), 0);
 
   /* ---------------- 渲染 ---------------- */
 
@@ -618,16 +649,23 @@ const App = () => {
         onChange={handleFileInputChange}
       />
 
-      {mode === 'practice' && image ? (
+      {mode === 'practice' && image && activeAlbumId ? (
         <PracticeView
+          key={activePageId}
           image={image}
-          title={practiceTitle}
+          title={activeAlbum ? activeAlbum.title : '临摹'}
           selectedCharacter={selectedCharacter}
           setSelectedCharacter={setSelectedCharacter}
           onBack={handleBackToLibrary}
           onOpenSegment={() => setShowSegment(true)}
-          recentImages={recentImages}
-          onSwitchImage={handleSwitchImage}
+          pages={pageList}
+          activePageId={activePageId}
+          pageIndex={pageIndex}
+          onSwitchPage={handleSwitchPage}
+          onAddPages={() => handlePickFiles(activeAlbumId)}
+          onRequestDeletePage={(pageId) =>
+            setDeleteTarget({ kind: 'page', albumId: activeAlbumId, pageId })
+          }
           db={db}
           gridVersion={gridVersion}
           resumePractice={resumePractice}
@@ -642,7 +680,7 @@ const App = () => {
               </span>
             </div>
             {tab === 'library' && (
-              <button className="icon-btn icon-btn--accent" onClick={handlePickFiles} aria-label="上传字帖">
+              <button className="icon-btn icon-btn--accent" onClick={() => handlePickFiles(null)} aria-label="新建字帖">
                 <FaPlus size={15} />
               </button>
             )}
@@ -653,8 +691,9 @@ const App = () => {
               <SettingsView
                 theme={theme}
                 onChangeTheme={setTheme}
-                stickerCount={recentImages.length}
-                maxStickers={MAX_STICKERS}
+                albumCount={albums.length}
+                pageCount={totalPages}
+                maxAlbums={MAX_ALBUMS}
                 onClearAll={handleClearAll}
                 db={db}
                 clipboardWatch={clipboardWatch}
@@ -680,12 +719,18 @@ const App = () => {
                 )}
 
                 <Library
-                images={recentImages}
-                currentImage={image}
-                onOpen={handleOpenSticker}
-                onRequestDelete={setDeleteIndex}
-                onPickFiles={handlePickFiles}
+                  albums={albums}
+                  lastAlbumId={resumePointer ? resumePointer.albumId : null}
                   progressMap={progressMap}
+                  notice={notice}
+                  onDismissNotice={() => setNotice('')}
+                  onOpen={openAlbum}
+                  onRequestDelete={(albumId) => setDeleteTarget({ kind: 'album', albumId })}
+                  onRequestRename={(album) => {
+                    setRenameValue(album.title || '');
+                    setRenameTarget({ albumId: album.id, title: album.title });
+                  }}
+                  onPickFiles={() => handlePickFiles(null)}
                   onImport={() => setShowImport(true)}
                 />
               </>
@@ -711,8 +756,15 @@ const App = () => {
         </>
       )}
 
+      {(switching || importing) && (
+        <div className="page-loading" role="status">
+          {importing ? '正在处理图片…' : '载入中…'}
+        </div>
+      )}
+
       {showSegment && image && (
         <SegmentSheet
+          key={activePageId}
           db={db}
           image={image}
           onSelectCharacter={(character) => {
@@ -737,17 +789,50 @@ const App = () => {
         />
       )}
 
-      {deleteIndex !== null && (
-        <div className="modal-backdrop" onClick={() => setDeleteIndex(null)}>
+      {deleteTarget && (
+        <div className="modal-backdrop" onClick={() => setDeleteTarget(null)}>
           <div className="modal" onClick={(event) => event.stopPropagation()}>
-            <h3 className="modal__title">删除这张字帖？</h3>
-            <p className="modal__desc">删除后需重新上传，本机不会保留副本。</p>
+            <h3 className="modal__title">
+              {deleteTarget.kind === 'album' ? '删除这本字帖？' : '删除这一页？'}
+            </h3>
+            <p className="modal__desc">
+              {deleteTarget.kind === 'album'
+                ? '字帖内所有页都会从本机移除，需重新导入。'
+                : '只移除当前字帖里的这一页，其他页不受影响。'}
+            </p>
             <div className="modal__actions">
-              <button className="btn btn--ghost" onClick={() => setDeleteIndex(null)}>
+              <button className="btn btn--ghost" onClick={() => setDeleteTarget(null)}>
                 取消
               </button>
               <button className="btn btn--danger" onClick={handleConfirmDelete}>
                 删除
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {renameTarget && (
+        <div className="modal-backdrop" onClick={() => setRenameTarget(null)}>
+          <div className="modal" onClick={(event) => event.stopPropagation()}>
+            <h3 className="modal__title">重命名字帖</h3>
+            <input
+              className="modal__input"
+              value={renameValue}
+              maxLength={40}
+              autoFocus
+              onChange={(event) => setRenameValue(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') handleConfirmRename();
+              }}
+              aria-label="字帖名称"
+            />
+            <div className="modal__actions">
+              <button className="btn btn--ghost" onClick={() => setRenameTarget(null)}>
+                取消
+              </button>
+              <button className="btn btn--primary" onClick={handleConfirmRename}>
+                保存
               </button>
             </div>
           </div>

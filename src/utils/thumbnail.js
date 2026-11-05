@@ -11,9 +11,19 @@
  * 只有进入临摹页时才加载原图。
  */
 
+import { hashImageData } from './imageHash.js';
+
 /** 缩略图长边像素（240 足够 2 倍屏卡片显示，解码后约 0.2MB） */
 const THUMB_SIZE = 240;
 
+/** 缩略图 data URL 的最大长度；超过就当成生成失败，绝不能把原图当缩略图存起来 */
+const THUMB_MAX_LENGTH = 200000;
+
+/**
+ * 缓存键用图片哈希而不是完整 dataUrl。
+ * 旧版以整串 base64 作 Map key，等于把每张原图都强引用在模块里，
+ * 删除字帖后也不会释放 —— 这正是 iOS 常驻内存居高不下的原因之一。
+ */
 const cache = new Map();
 
 /**
@@ -24,7 +34,8 @@ const cache = new Map();
 export const makeThumbnail = (dataUrl) => {
   if (!dataUrl) return Promise.resolve('');
 
-  if (cache.has(dataUrl)) return Promise.resolve(cache.get(dataUrl));
+  const key = hashImageData(dataUrl);
+  if (cache.has(key)) return Promise.resolve(cache.get(key));
 
   // 首选方案：createImageBitmap + resizeWidth
   // 关键优势：解码时就直接按目标尺寸采样，**不会把整张原图解码进内存**。
@@ -34,7 +45,7 @@ export const makeThumbnail = (dataUrl) => {
   if (typeof createImageBitmap === 'function') {
     return fetchThumbViaBitmap(dataUrl).then((thumb) => {
       if (thumb) {
-        cache.set(dataUrl, thumb);
+        cache.set(hashImageData(dataUrl), thumb);
         return thumb;
       }
       return makeThumbnailFallback(dataUrl);
@@ -130,7 +141,7 @@ const makeThumbnailFallback = (dataUrl) => {
           return;
         }
 
-        cache.set(dataUrl, thumb);
+        cache.set(hashImageData(dataUrl), thumb);
         resolve(thumb);
       } catch (error) {
         resolve(dataUrl);
@@ -153,23 +164,29 @@ const makeThumbnailFallback = (dataUrl) => {
   });
 };
 
-/** 批量生成缩略图，返回 Map<原图, 缩略图> */
-export const makeThumbnails = async (urls) => {
-  const result = new Map();
-  await Promise.all(
-    urls.map(async (url) => {
-      result.set(url, await makeThumbnail(url));
-    })
-  );
-  return result;
+/**
+ * 生成可安全持久化的小缩略图。
+ * makeThumbnail 失败时会回退成原图 dataUrl —— 直接存进字帖元数据就会把整张
+ * 大图重新带回内存，所以这里统一挡掉：失败返回空串，UI 显示占位图。
+ */
+export const buildThumbnail = async (dataUrl) => {
+  if (!dataUrl) return '';
+  try {
+    const thumb = await makeThumbnail(dataUrl);
+    if (!thumb || thumb === dataUrl || thumb.length > THUMB_MAX_LENGTH) return '';
+    return thumb;
+  } catch (error) {
+    return '';
+  }
 };
 
 /** 清理缓存（图片被删除时调用） */
 export const dropThumbnail = (dataUrl) => {
-  cache.delete(dataUrl);
+  if (!dataUrl) return;
+  cache.delete(hashImageData(dataUrl));
 };
 
-/** 清空全部缓存 */
+/** 清空全部缓存（关闭字帖时调用，释放本字帖的缩略图引用） */
 export const clearThumbnailCache = () => {
   cache.clear();
 };
