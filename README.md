@@ -131,7 +131,7 @@
 ```bash
 npm install --legacy-peer-deps      # react-image-magnifiers 的 peer 依赖需放宽
 npm run dev                          # 开发服务器（端口 5199）
-npm test                             # 90 项单元测试
+npm test                             # 107 项单元测试
 npm run build                        # 生产构建
 ```
 
@@ -149,13 +149,26 @@ npm run android:open  # 打开 Android Studio
 ### 测试
 
 ```bash
-node scripts/test-segment.mjs    # 切分算法 31 项
-node scripts/test-boxedit.mjs    # 框编辑 11 项
-node scripts/test-cache.mjs      # 缓存清理 5 项
-node scripts/test-practice.mjs   # 练习记录 7 项
-node scripts/test-wechat.mjs     # 公众号提取 24 项
-node scripts/test-clipboard.mjs  # 剪贴板 12 项
+node scripts/test-segment.mjs            # 切分算法纯函数 40 项
+node scripts/test-boxedit.mjs            # 框编辑 11 项
+node scripts/test-cache.mjs              # 缓存清理 5 项
+node scripts/test-practice.mjs           # 练习记录 7 项
+node scripts/test-wechat.mjs             # 公众号提取 24 项
+node scripts/test-clipboard.mjs          # 剪贴板 12 项
+node scripts/test-segment-fixtures.mjs   # 真实图 golden 快照 8 项
 ```
+
+### 真实图 golden 夹具
+
+`src/utils/segment.js` 导出的 `segmentFromMasks(ink, faint, options)` 是纯计算入口，
+`segmentCharacters` 只负责图像解码与参数透传，两者共用同一条切分链路。
+`scripts/fixtures/segment/` 存放 5 套真实字帖的位压缩墨迹/格线掩码与逐框快照
+（共 6 个 case，含无格自由切分与格线模式），测试直接调用 `segmentFromMasks` 比对。
+
+改动任何切分参数后测试会精确报出「哪张图、第几框、期望值与实际值」；
+若确有意为之，用 `node scripts/test-segment-fixtures.mjs --update` 更新快照。
+掩码由 `scripts/gen-segment-fixtures.py` 生成（需要 Pillow + numpy，仅用于再生成，
+不参与 `npm test`）；原始字帖图不进仓库，前两套取自本机 Downloads，其余取自 `docs/screens/`。
 
 ---
 
@@ -184,7 +197,8 @@ src/
     imageHash.js           图片哈希（缓存键）
 
 openspec/changes/          各轮改动的设计记录与踩坑总结
-scripts/                   单元测试
+scripts/                   单元测试、夹具生成与 golden 快照
+  fixtures/segment/        5 套真实字帖的位压缩掩码与逐框快照
 docs/screens/              界面截图
 ```
 

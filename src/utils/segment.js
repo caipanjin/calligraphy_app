@@ -1020,14 +1020,24 @@ export const boxesFromGridLines = (grid, layout = 'vertical') => {
 };
 
 /**
- * 主入口：把整幅字帖切成一个个单字
- * @returns {Promise<{boxes: Array, layout: string, columns: number, scale: number, failed: boolean, reason?: string}>}
+ * 从已构建的墨迹 / 格线掩码切分单字（同步纯计算，不依赖 DOM）。
+ * 由 segmentCharacters 与 golden 回归测试共用，保证夹具测的是真实切分链路。
+ * 参数语义与 segmentCharacters 的 options 一致，只是把图像解码前置到调用方。
+ * @returns {{boxes: Array, layout: string, columns: number, scale: number, failed: boolean, strategy?: string}}
  */
-export const segmentCharacters = async (imageSrc, options = {}) => {
-  const { maxSize = MAX_ANALYSIS_SIZE, layout: forcedLayout = 'auto', hasGrid = false } = options;
-  const img = await loadImageElement(imageSrc);
-  const { width: W, height: H, ink, faint, scale } = buildInkMask(img, maxSize);
-
+export const segmentFromMasks = (
+  ink,
+  faint,
+  {
+    width: W,
+    height: H,
+    scale = 1,
+    imageWidth = W / scale,
+    imageHeight = H / scale,
+    layout: forcedLayout = 'auto',
+    hasGrid = false
+  } = {}
+) => {
   const gapCol = Math.max(2, Math.round(W * GAP_RATIO));
   const gapRow = Math.max(2, Math.round(H * GAP_RATIO));
   const minSizeCol = Math.max(2, Math.round(W * MIN_SIZE_RATIO));
@@ -1303,15 +1313,35 @@ export const segmentCharacters = async (imageSrc, options = {}) => {
     debug,
     pitch: pitch / scale,
     scale,
-    // 原图尺寸：调用方用它判断缓存是否仍与当前图片匹配。
-    // 必须直接取 img 的真实尺寸 —— 用 W/scale 反推会有 1~2px 舍入误差，
-    // 导致与 naturalWidth 严格相等判断失败、缓存永不命中。
-    imageWidth: img.naturalWidth || img.width,
-    imageHeight: img.naturalHeight || img.height,
+    // 原图尺寸：调用方用它判断缓存是否仍与当前图片匹配（由入参传入）
+    imageWidth,
+    imageHeight,
     failed: false,
     charSize: {
       width: median(usable.map((box) => box.width)),
       height: median(usable.map((box) => box.height))
     }
   };
+};
+
+/**
+ * 主入口：把整幅字帖切成一个个单字
+ * 只负责图像解码与掩码构建，计算交给 segmentFromMasks
+ * @returns {Promise<{boxes: Array, layout: string, columns: number, scale: number, failed: boolean, reason?: string}>}
+ */
+export const segmentCharacters = async (imageSrc, options = {}) => {
+  const { maxSize = MAX_ANALYSIS_SIZE } = options;
+  const img = await loadImageElement(imageSrc);
+  const { width, height, ink, faint, scale } = buildInkMask(img, maxSize);
+  return segmentFromMasks(ink, faint, {
+    width,
+    height,
+    scale,
+    // 必须直接取 img 的真实尺寸 —— 用 width/scale 反推会有 1~2px 舍入误差，
+    // 导致与 naturalWidth 严格相等判断失败、缓存永不命中。
+    imageWidth: img.naturalWidth || img.width,
+    imageHeight: img.naturalHeight || img.height,
+    layout: options.layout,
+    hasGrid: options.hasGrid
+  });
 };
