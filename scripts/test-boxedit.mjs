@@ -1,6 +1,21 @@
 /** 切分框编辑操作的单元测试 */
 import assert from 'node:assert/strict';
-import { removeBox, mergeBoxes, splitBox, findNearestBoxIndex, addBox } from '../src/utils/boxEdit.js';
+import {
+  removeBox,
+  mergeBoxes,
+  splitBox,
+  findNearestBoxIndex,
+  addBox,
+  sortBoxesByReadingOrder,
+  groupBoxesByColumn,
+  moveBox,
+  resizeBox,
+  setColumnBoundary,
+  columnBoundaries,
+  resegmentColumnRange,
+  snapValue,
+  MIN_BOX_SIZE
+} from '../src/utils/boxEdit.js';
 
 let passed = 0;
 const check = (name, fn) => {
@@ -34,7 +49,7 @@ check('合并两个相邻框为外接框', () => {
   const out = mergeBoxes(boxes, 0, 1);
   assert.equal(out.length, 2);
   assert.equal(out[0].y, 0);
-  assert.equal(out[0].height, 200); // 0..200
+  assert.equal(out[0].height, 200);
 });
 
 check('合并同一索引无效果', () => {
@@ -65,31 +80,224 @@ check('只有一个框时无最近邻', () => {
 });
 
 check('加框：同列内按 y 顺序插入', () => {
-  const boxes = [
+  const input = [
     { x: 100, y: 100, width: 200, height: 200 },
     { x: 100, y: 400, width: 200, height: 200 }
   ];
-  const out = addBox(boxes, { x: 100, y: 250, width: 200, height: 120 }, true);
+  const out = addBox(input, { x: 100, y: 250, width: 200, height: 120 }, true);
   assert.equal(out.length, 3);
   assert.deepEqual(out.map((b) => b.y), [100, 250, 400]);
 });
 
 check('加框：不同列时按 x 从右到左', () => {
-  const boxes = [
+  const input = [
     { x: 100, y: 100, width: 200, height: 200 },
     { x: 400, y: 100, width: 200, height: 200 }
   ];
-  // 在最左列加一个（x=100 列，y 在中间）
-  const out = addBox(boxes, { x: 100, y: 350, width: 200, height: 120 }, true);
-  // 右列（x=400）应排第一
+  const out = addBox(input, { x: 100, y: 350, width: 200, height: 120 }, true);
   assert.equal(out[0].x, 400);
 });
 
 check('加框：不修改原数组', () => {
-  const boxes = [{ x: 100, y: 100, width: 200, height: 200 }];
+  const input = [{ x: 100, y: 100, width: 200, height: 200 }];
+  const before = JSON.stringify(input);
+  addBox(input, { x: 100, y: 400, width: 200, height: 200 }, true);
+  assert.equal(JSON.stringify(input), before);
+});
+
+/* ---- 阅读顺序与列聚类 ---- */
+
+check('阅读顺序：抽出后的排序与加框一致', () => {
+  const input = [
+    { x: 100, y: 400, width: 200, height: 200 },
+    { x: 400, y: 100, width: 200, height: 200 }
+  ];
+  const sorted = sortBoxesByReadingOrder(input, true);
+  assert.equal(sorted[0].x, 400);
+  assert.equal(sorted[1].x, 100);
+  assert.deepEqual(sorted, addBox([input[0]], input[1], true));
+});
+
+check('列聚类：4 列字数不同、字位错落也能正确分组', () => {
+  const input = [
+    { x: 500, y: 40, width: 100, height: 100 },
+    { x: 500, y: 190, width: 100, height: 150 },
+    { x: 500, y: 368, width: 100, height: 120 },
+    { x: 300, y: 28, width: 100, height: 195 },
+    { x: 300, y: 234, width: 100, height: 162 },
+    { x: 100, y: 43, width: 100, height: 191 }
+  ];
+  const cols = groupBoxesByColumn(input);
+  assert.equal(cols.length, 3);
+  assert.deepEqual(cols.map((c) => c.indices.length), [3, 2, 1]);
+  assert.deepEqual(cols[0].indices, [0, 1, 2]);
+});
+
+check('列聚类：空数组与单框', () => {
+  assert.deepEqual(groupBoxesByColumn([]), []);
+  assert.deepEqual(groupBoxesByColumn([boxes[0]]).map((c) => c.indices), [[0]]);
+});
+
+/* ---- 平移 ---- */
+
+check('平移：正常移动且索引顺序不变', () => {
+  const out = moveBox(boxes, 1, 10, -20, { width: 1000, height: 1000 });
+  assert.deepEqual({ x: out[1].x, y: out[1].y }, { x: 10, y: 100 });
+  assert.deepEqual(out.map((b) => b.width), [100, 100, 100]);
+  assert.notEqual(out, boxes);
+});
+
+check('平移：左上角与右下角都被钳制在图片内', () => {
+  const top = moveBox(boxes, 0, -500, -500, { width: 300, height: 300 });
+  assert.deepEqual({ x: top[0].x, y: top[0].y }, { x: 0, y: 0 });
+  const bottom = moveBox(boxes, 0, 5000, 5000, { width: 300, height: 300 });
+  assert.deepEqual({ x: bottom[0].x, y: bottom[0].y }, { x: 200, y: 200 });
+});
+
+check('平移：无变化时返回原数组，非法索引安全', () => {
+  assert.equal(moveBox(boxes, 0, 0, 0, { width: 1000, height: 1000 }), boxes);
+  assert.equal(moveBox(boxes, 99, 10, 10), boxes);
+  assert.equal(moveBox(boxes, 0, NaN, 0), boxes);
+});
+
+check('平移：不修改原数组', () => {
   const before = JSON.stringify(boxes);
-  addBox(boxes, { x: 100, y: 400, width: 200, height: 200 }, true);
+  moveBox(boxes, 0, 50, 50, { width: 1000, height: 1000 });
   assert.equal(JSON.stringify(boxes), before);
+});
+
+/* ---- 拉伸 ---- */
+
+check('拉伸：下边只改高度，上边保持不动', () => {
+  const out = resizeBox(boxes, 0, 's', 0, 40, { width: 1000, height: 1000 });
+  assert.equal(out[0].y, 0);
+  assert.equal(out[0].height, 140);
+});
+
+check('拉伸：上边下移时下边保持不动', () => {
+  const out = resizeBox(boxes, 0, 'n', 0, 30, { width: 1000, height: 1000 });
+  assert.equal(out[0].y, 30);
+  assert.equal(out[0].height, 70);
+  assert.equal(out[0].y + out[0].height, 100);
+});
+
+check('拉伸：四角同时改变位置与尺寸（左边界被图片钳制）', () => {
+  const out = resizeBox(boxes, 1, 'nw', -20, -10, { width: 1000, height: 1000 });
+  assert.equal(out[1].x, 0, 'x 已在左边界，继续往左拖应被钳制');
+  assert.equal(out[1].y, 110);
+  assert.equal(out[1].width, 100);
+  assert.equal(out[1].height, 90);
+});
+
+check('拉伸：最小尺寸保护，不会压成零或负数', () => {
+  const out = resizeBox(boxes, 0, 's', 0, -1000, { width: 1000, height: 1000 });
+  assert.equal(out[0].height, MIN_BOX_SIZE);
+  const left = resizeBox(boxes, 0, 'w', 1000, 0, { width: 1000, height: 1000 });
+  assert.equal(left[0].width, MIN_BOX_SIZE);
+});
+
+check('拉伸：右/下边被图片边界钳制', () => {
+  const out = resizeBox(boxes, 0, 'se', 1000, 1000, { width: 250, height: 250 });
+  assert.equal(out[0].x + out[0].width, 250);
+  assert.equal(out[0].y + out[0].height, 250);
+});
+
+check('拉伸：非法边名与非法索引安全', () => {
+  assert.equal(resizeBox(boxes, 99, 's', 0, 10), boxes);
+  assert.equal(resizeBox(boxes, 0, 'x', 0, 10), boxes);
+});
+
+/* ---- 本列切线 ---- */
+
+check('本列切线：取相邻框边界中点', () => {
+  assert.deepEqual(columnBoundaries(boxes, [0, 1, 2]), [110, 210]);
+  assert.deepEqual(columnBoundaries(boxes, [0]), []);
+});
+
+check('拖动切线：上下两框同步、不重叠不留缝', () => {
+  const out = setColumnBoundary(boxes, [0, 1, 2], 0, 110);
+  assert.equal(out[0].y + out[0].height, 110);
+  assert.equal(out[1].y, 110);
+  assert.equal(out[1].y + out[1].height, 200);
+  assert.equal(out[2].y, 220);
+});
+
+check('拖动切线：钳制在两框内部，不会把字压没', () => {
+  const low = setColumnBoundary(boxes, [0, 1], 0, -9999);
+  assert.equal(low[0].height, MIN_BOX_SIZE);
+  const high = setColumnBoundary(boxes, [0, 1], 0, 9999);
+  assert.equal(high[1].height, MIN_BOX_SIZE);
+});
+
+check('拖动切线：越界 boundaryIndex 与非法 y 安全', () => {
+  assert.equal(setColumnBoundary(boxes, [0, 1], 1, 110), boxes);
+  assert.equal(setColumnBoundary(boxes, [0, 1], -1, 110), boxes);
+  assert.equal(setColumnBoundary(boxes, [0, 1], 0, NaN), boxes);
+});
+
+check('重切本段：3 条切线把 5 个框切成 4 个', () => {
+  const input = [
+    { x: 100, y: 100, width: 100, height: 100 },
+    { x: 100, y: 200, width: 100, height: 100 },
+    { x: 100, y: 300, width: 100, height: 100 },
+    { x: 100, y: 400, width: 100, height: 100 },
+    { x: 100, y: 500, width: 100, height: 100 },
+    { x: 400, y: 100, width: 100, height: 100 }
+  ];
+  const out = resegmentColumnRange(input, [0, 1, 2, 3, 4], [150, 300, 450]);
+  assert.equal(out.length, 5);
+  const left = out.filter((b) => b.x === 100);
+  assert.equal(left.length, 4);
+  assert.deepEqual(left.map((b) => b.height), [50, 150, 150, 150]);
+  assert.equal(left[0].y, 100);
+  assert.equal(left[3].y + left[3].height, 600);
+  assert.equal(out[0].x, 400, '右列仍应排在最前');
+});
+
+check('重切本段：x 与宽度取中位数，不被异常框带偏', () => {
+  const input = [
+    { x: 100, y: 100, width: 100, height: 100 },
+    { x: 100, y: 200, width: 100, height: 100 },
+    { x: 100, y: 300, width: 400, height: 100 }
+  ];
+  const out = resegmentColumnRange(input, [0, 1, 2], [250]);
+  assert.equal(out.length, 2);
+  assert.ok(out.every((b) => b.width === 100), `宽度应取中位数，实际 ${out.map((b) => b.width)}`);
+});
+
+check('重切本段：过近/越界的切线被忽略，无有效切线时原样返回', () => {
+  const input = [boxes[0], boxes[1], boxes[2]];
+  assert.equal(resegmentColumnRange(input, [0, 1], [], true), input);
+  assert.equal(resegmentColumnRange(input, [0, 1], [9999], true), input);
+  const out = resegmentColumnRange(input, [0, 1, 2], [150, 152], true);
+  assert.equal(out.filter((b) => b.y === 150).length, 1, '相距 <8px 的切线应去重');
+});
+
+check('重切本段：不修改原数组，重复调用幂等', () => {
+  const input = [
+    { x: 100, y: 100, width: 100, height: 100 },
+    { x: 100, y: 200, width: 100, height: 100 }
+  ];
+  const before = JSON.stringify(input);
+  const once = resegmentColumnRange(input, [0, 1], [150]);
+  const twice = resegmentColumnRange(once, [0, 1], [150]);
+  assert.equal(JSON.stringify(input), before);
+  assert.deepEqual(once, twice);
+});
+
+/* ---- 吸附 ---- */
+
+check('吸附：容差内命中最近候选', () => {
+  assert.equal(snapValue(103, [100, 200], 8), 100);
+  assert.equal(snapValue(197, [100, 200], 8), 200);
+  assert.equal(snapValue(104, [100, 106], 8), 106, '多个候选都在容差内时取最近的');
+  assert.equal(snapValue(103, [100, 106], 8), 100, '距离相同时取先出现的候选');
+});
+
+check('吸附：容差外、空候选、非法值都原样返回', () => {
+  assert.equal(snapValue(150, [100, 200], 8), 150);
+  assert.equal(snapValue(150, [], 8), 150);
+  assert.equal(snapValue(NaN, [100], 8), NaN);
 });
 
 console.log(`\n${passed} 项通过`);

@@ -8,7 +8,7 @@
   - faint：7x7 邻域（步长 3）灰度中位数减当前灰度 > 6，且当前不是墨迹
 位压缩：每像素 1 bit，行优先、MSB first，与 test-segment-fixtures.mjs 的 unpack 对应。
 
-注意：原始字帖图片不进仓库。其中三套来自本机 Downloads（两张字帖 + 一张对联），
+注意：原始字帖图片不进仓库。其中四套来自本机 Downloads（三张字帖 + 一张对联），
 需保证文件仍在；其余三套来自仓库内 docs/screens/ 的界面截图（按固定矩形裁剪）。
 faint 的邻域中位数在距边缘 7px 内用 nanmedian 近似 JS 的「丢弃越界样本后
 取上中位数」，格线均在图像内部，不影响检测结果。
@@ -78,6 +78,18 @@ FIXTURES = [
             "放宽上限。当前快照为 15 框 / 2 联：右联 7 框准确，"
             "左联 8 框是已知缺陷——下半字间隙 9~12px < minGap 13px 被并成长带后按列宽均分，"
             "与字位错开。修复该缺陷时此快照会触发差异，需 --update。"
+        ),
+        "cases": [{"id": "free", "layout": "vertical", "hasGrid": False}],
+    },
+    {
+        "name": "cursive-vertical",
+        "source": "~/Downloads/IMG_4575.JPG",
+        "crop": None,
+        "note": (
+            "无格行书 1080x880，4 列字数 5/4/4/4，各列字位与字高都不对齐："
+            "同位字字心极差最大 157px（17.8% 图高），框高 115~239px，字间空白 -4~43px "
+            "（含框重叠与连写穿插）。用于守住「不做跨列对齐 / 等距推断」的设计边界。"
+            "free 记录当前自动切分现状 17 框；改动切分算法时会触发差异，需 --update。"
         ),
         "cases": [{"id": "free", "layout": "vertical", "hasGrid": False}],
     },

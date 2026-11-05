@@ -9,7 +9,8 @@ import {
   FaCut,
   FaPen,
   FaCheck,
-  FaPlus
+  FaPlus,
+  FaUndo
 } from 'react-icons/fa';
 import { segmentCharacters } from '../utils/segment';
 import { hashImageData } from '../utils/imageHash';
@@ -21,11 +22,28 @@ import {
   writeSettings,
   canReuseSegmentation
 } from '../utils/segmentCache';
-import { removeBox, mergeBoxes, splitBox, findNearestBoxIndex, addBox } from '../utils/boxEdit';
+import {
+  removeBox, mergeBoxes, splitBox, findNearestBoxIndex, addBox,
+  groupBoxesByColumn, columnBoundaries, setColumnBoundary,
+  resegmentColumnRange, moveBox, resizeBox, snapValue
+} from '../utils/boxEdit';
+import { getCandidateBoundaries } from '../utils/inkProfile';
 import { deleteImagePractice, readImagePractice } from '../utils/practiceStore';
 
 // 字帖一律竖排，不再提供版面切换
 const LAYOUT_OPTIONS = [{ value: 'vertical', label: '竖排' }];
+
+// 选中框上的 8 个拖拽手柄（四角 + 四边），每条边都能单独调整
+const HANDLES = [
+  { edge: 'nw', className: 'seg-handle--nw' },
+  { edge: 'n', className: 'seg-handle--n' },
+  { edge: 'ne', className: 'seg-handle--ne' },
+  { edge: 'e', className: 'seg-handle--e' },
+  { edge: 'se', className: 'seg-handle--se' },
+  { edge: 's', className: 'seg-handle--s' },
+  { edge: 'sw', className: 'seg-handle--sw' },
+  { edge: 'w', className: 'seg-handle--w' }
+];
 
 /**
  * 自动切字抽屉：把整幅字帖按投影切成单字，点任意框直接进入单字临摹
@@ -55,6 +73,26 @@ const SegmentSheet = ({ image, db, onSelectCharacter, onClose }) => {
   const draftStartRef = useRef(null);
   const previewRef = useRef(null);
   const [practicedCount, setPracticedCount] = useState(0);
+  // 本列切线：只作用于选中框所在的列，绝不做跨列对齐或等距推断
+  const [cutMode, setCutMode] = useState(false);
+  const [candidateLines, setCandidateLines] = useState([]); // 原图坐标 y
+  const [selectedLines, setSelectedLines] = useState([]);
+  const [profilePending, setProfilePending] = useState(false);
+  const [historyDepth, setHistoryDepth] = useState(0);
+  const historyRef = useRef([]);
+  const maskRef = useRef(null); // 缓存 buildInkMask 结果，避免每次找候选线都重新二值化
+  const dragRef = useRef(null);
+  const suppressClickRef = useRef(false);
+
+  // 换一张字帖时清掉上一张的编辑中间状态
+  useEffect(() => {
+    setCutMode(false);
+    setCandidateLines([]);
+    setSelectedLines([]);
+    setHistoryDepth(0);
+    historyRef.current = [];
+    maskRef.current = null;
+  }, [image]);
 
   // 先恢复这张字帖上次的版面设置与「是否带格子线」
   useEffect(() => {
@@ -242,12 +280,21 @@ const SegmentSheet = ({ image, db, onSelectCharacter, onClose }) => {
     if (action) action();
   }, [pendingAction, db, image]);
 
-  const handleBoxClick = (box, index) => {
+  const selectBox = (box, index) => {
     if (editing) {
       setSelectedIndex((current) => (current === index ? null : index));
       return;
     }
     handlePick(box, index);
+  };
+
+  const handleBoxClick = (box, index) => {
+    // 刚拖完框 / 切线时浏览器还可能合成一次 click，吞掉它，避免误改选中态
+    if (suppressClickRef.current) {
+      suppressClickRef.current = false;
+      return;
+    }
+    selectBox(box, index);
   };
 
   const handlePick = (box, index) => {
@@ -272,6 +319,21 @@ const SegmentSheet = ({ image, db, onSelectCharacter, onClose }) => {
 
   const autoBoxes = result && !result.failed ? result.boxes : [];
   const boxes = editedBoxes || autoBoxes;
+
+  // 选中框所在列（从右到左聚类、列内从上到下）。切线只覆盖这一列，
+  // 其它列完全不参与——无格字帖各列字数、字高、字位都可能不同。
+  const activeColumn = selectedIndex === null
+    ? null
+    : groupBoxesByColumn(boxes).find((column) => column.indices.includes(selectedIndex)) || null;
+  const columnCuts = activeColumn ? columnBoundaries(boxes, activeColumn.indices) : [];
+  const columnRange = activeColumn
+    ? {
+        x0: Math.min(...activeColumn.indices.map((i) => boxes[i].x)),
+        x1: Math.max(...activeColumn.indices.map((i) => boxes[i].x + boxes[i].width)),
+        y0: Math.min(...activeColumn.indices.map((i) => boxes[i].y)),
+        y1: Math.max(...activeColumn.indices.map((i) => boxes[i].y + boxes[i].height))
+      }
+    : null;
 
   // 任意编辑后切到「用户结果」，后续操作都基于它
   // 两个键：自动结果与用户结果分开存，互不覆盖
@@ -453,9 +515,21 @@ const SegmentSheet = ({ image, db, onSelectCharacter, onClose }) => {
     return saveChainRef.current;
   };
 
-  const applyBoxes = (next) => {
+  /**
+   * 提交一次编辑。拖动类操作在 pointerup 时才调用（拖动中只改本地状态），
+   * 因此一次连续拖拽只记一步历史、只写一次缓存。
+   *
+   * options.historyFrom 传拖动开始前的框，用于撤销；
+   * options.keepSelection 用于拖完切线后继续保持选中，方便连续微调。
+   */
+  const applyBoxes = (next, options = {}) => {
+    if (options.record !== false) {
+      historyRef.current.push(options.historyFrom || boxes);
+      if (historyRef.current.length > 20) historyRef.current.shift();
+      setHistoryDepth(historyRef.current.length);
+    }
     setEditedBoxes(next);
-    setSelectedIndex(null);
+    if (!options.keepSelection) setSelectedIndex(null);
     if (!db || !manualKey) return Promise.resolve(false);
     const promise = writeSegmentation(db, manualKey, {
       boxes: next,
@@ -468,6 +542,148 @@ const SegmentSheet = ({ image, db, onSelectCharacter, onClose }) => {
       adjustments: {}
     });
     return queueSave(promise);
+  };
+
+  const handleUndo = () => {
+    if (historyRef.current.length === 0) return;
+    const previous = historyRef.current.pop();
+    setHistoryDepth(historyRef.current.length);
+    applyBoxes(previous, { record: false });
+  };
+
+  /* ---------------- 本列切线 / 框拖动（不做跨列对齐） ---------------- */
+
+  const toImagePoint = (event) => {
+    const point = pointToPercent(event);
+    if (!point) return null;
+    return { x: point.x * imageSize.width, y: point.y * imageSize.height };
+  };
+
+  const startDrag = (event, config) => {
+    if (!editing || drawing) return;
+    const point = toImagePoint(event);
+    if (!point) return;
+    event.preventDefault();
+    event.stopPropagation();
+    // 捕获指针：拖出框 / 切线本身后仍能收到 move 与 up
+    if (event.currentTarget.setPointerCapture && Number.isFinite(event.pointerId)) {
+      try {
+        event.currentTarget.setPointerCapture(event.pointerId);
+      } catch (error) {
+        /* 某些浏览器不支持捕获时，退回容器级事件 */
+      }
+    }
+    dragRef.current = {
+      ...config,
+      start: point,
+      startBoxes: boxes.map((box) => ({ ...box })),
+      startY: config.kind === 'boundary' ? columnCuts[config.boundaryIndex] : 0,
+      column: activeColumn ? [...activeColumn.indices] : [],
+      moved: false,
+      lastBoxes: null
+    };
+  };
+
+  const handleDragMove = (event) => {
+    const drag = dragRef.current;
+    if (!drag) return;
+    const point = toImagePoint(event);
+    if (!point) return;
+    const dx = point.x - drag.start.x;
+    const dy = point.y - drag.start.y;
+    if (!drag.moved && Math.abs(dx) + Math.abs(dy) < 2) return;
+    drag.moved = true;
+    event.preventDefault();
+
+    const bounds = { width: imageSize.width, height: imageSize.height };
+    let next = null;
+    if (drag.kind === 'move') {
+      next = moveBox(drag.startBoxes, drag.index, dx, dy, bounds);
+    } else if (drag.kind === 'resize') {
+      next = resizeBox(drag.startBoxes, drag.index, drag.edge, dx, dy, bounds);
+    } else if (drag.kind === 'boundary') {
+      // 只吸附本列的候选线与其它切线，绝不吸附另一列的字位
+      const candidates = [
+        ...candidateLines,
+        ...columnCuts.filter((_, i) => i !== drag.boundaryIndex)
+      ];
+      const y = snapValue(drag.startY + dy, candidates, 8);
+      next = setColumnBoundary(drag.startBoxes, drag.column, drag.boundaryIndex, y);
+    }
+    if (!next) return;
+    drag.lastBoxes = next;
+    // 拖动中只更新本地显示，结束时才写缓存 / 记历史
+    setEditedBoxes(next);
+  };
+
+  const handleDragEnd = () => {
+    const drag = dragRef.current;
+    dragRef.current = null;
+    if (!drag) return;
+
+    // pointerdown 上阻止了默认行为，浏览器可能不再合成 click。
+    // 点击（未拖动）在这里显式处理，并把随后可能到来的 click 吞掉。
+    suppressClickRef.current = true;
+    setTimeout(() => {
+      suppressClickRef.current = false;
+    }, 80);
+    if (!drag.moved) {
+      if (drag.kind === 'move') selectBox(boxes[drag.index], drag.index);
+      return;
+    }
+    if (!drag.lastBoxes) return;
+    applyBoxes(drag.lastBoxes, {
+      historyFrom: drag.startBoxes,
+      keepSelection: true
+    });
+  };
+
+  const toggleCutMode = () => {
+    setCutMode((value) => !value);
+    setCandidateLines([]);
+    setSelectedLines([]);
+  };
+
+  /** 只在本列范围内找行投影低谷，给出「可能」的字间切线，由用户点选 */
+  const handleFindCandidates = async () => {
+    if (!columnRange || !image || profilePending) return;
+    setProfilePending(true);
+    try {
+      const { boundaries, mask } = await getCandidateBoundaries(image, {
+        x0: columnRange.x0,
+        x1: columnRange.x1,
+        y0: columnRange.y0,
+        y1: columnRange.y1,
+        mask: maskRef.current,
+        maxCount: 16
+      });
+      maskRef.current = mask;
+      setCandidateLines(boundaries);
+      setSelectedLines([]);
+    } catch (error) {
+      setCandidateLines([]);
+    } finally {
+      setProfilePending(false);
+    }
+  };
+
+  const toggleCandidateLine = (y) => {
+    setSelectedLines((current) =>
+      current.includes(y) ? current.filter((v) => v !== y) : [...current, y].sort((a, b) => a - b)
+    );
+  };
+
+  const handleApplyCuts = () => {
+    if (!activeColumn || selectedLines.length === 0) return;
+    const next = resegmentColumnRange(boxes, activeColumn.indices, selectedLines, true);
+    if (next === boxes) return;
+    const source = boxes; // 确认弹窗期间 boxes 可能变化，历史固定为点击那一刻
+    confirmIfPracticed(() => {
+      clearPracticeForImage();
+      applyBoxes(next, { historyFrom: source });
+      setCandidateLines([]);
+      setSelectedLines([]);
+    });
   };
 
   const handleDelete = () => {
@@ -598,9 +814,13 @@ const SegmentSheet = ({ image, db, onSelectCharacter, onClose }) => {
             <div className="seg-edit-hint">
               {drawing
                 ? '在图片上单击生成一个默认大小的框，或拖拽画出指定大小'
-                : selectedIndex === null
-                  ? '点击任意框选中，再选择下方操作'
-                  : `已选中第 ${selectedIndex + 1} 个框`}
+                : cutMode
+                  ? selectedIndex === null
+                    ? '切线模式：先点本列任意一个框'
+                    : `本列 ${columnCuts.length + 1} 字 · 拖动横线调相邻两字边界，框可整体拖动或拉角`
+                  : selectedIndex === null
+                    ? '点击任意框选中，再选择下方操作；框可直接拖动'
+                    : `已选中第 ${selectedIndex + 1} 个框，可拖动或拉角调整`}
             </div>
           )}
 
@@ -615,10 +835,13 @@ const SegmentSheet = ({ image, db, onSelectCharacter, onClose }) => {
               onTouchStart={handleDrawStart}
               onTouchMove={handleDrawMove}
               onTouchEnd={handleDrawEnd}
+              onPointerMove={handleDragMove}
+              onPointerUp={handleDragEnd}
+              onPointerCancel={handleDragEnd}
             >
               <img src={image} alt="切分结果" draggable={false} />
               {boxes.map((box, index) => (
-                <button
+                <div
                   key={`${index}-${Math.round(box.x)}-${Math.round(box.y)}`}
                   className={`seg-box${editing ? ' seg-box--editable' : ''}${
                     selectedIndex === index ? ' seg-box--selected' : ''
@@ -630,9 +853,65 @@ const SegmentSheet = ({ image, db, onSelectCharacter, onClose }) => {
                     height: `${(box.height / imageSize.height) * 100}%`
                   }}
                   onClick={() => handleBoxClick(box, index)}
+                  onPointerDown={(event) => startDrag(event, { kind: 'move', index })}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault();
+                      handleBoxClick(box, index);
+                    }
+                  }}
+                  role="button"
+                  tabIndex={0}
                   aria-label={`第 ${index + 1} 个字`}
-                />
+                >
+                  {editing && selectedIndex === index &&
+                    HANDLES.map((handle) => (
+                      <span
+                        key={handle.edge}
+                        className={`seg-handle ${handle.className}`}
+                        onPointerDown={(event) =>
+                          startDrag(event, { kind: 'resize', index, edge: handle.edge })
+                        }
+                        role="presentation"
+                      />
+                    ))}
+                </div>
               ))}
+              {cutMode && editing && columnRange && (
+                <>
+                  {columnCuts.map((y, i) => (
+                    <div
+                      key={`cut-${i}`}
+                      className="seg-cut-line"
+                      style={{
+                        left: `${(columnRange.x0 / imageSize.width) * 100}%`,
+                        width: `${((columnRange.x1 - columnRange.x0) / imageSize.width) * 100}%`,
+                        top: `${(y / imageSize.height) * 100}%`
+                      }}
+                      onPointerDown={(event) =>
+                        startDrag(event, { kind: 'boundary', boundaryIndex: i })
+                      }
+                      role="slider"
+                      tabIndex={-1}
+                      aria-label={`第 ${i + 1} 条切线`}
+                      aria-valuenow={Math.round(y)}
+                    />
+                  ))}
+                  {candidateLines.map((y, i) => (
+                    <div
+                      key={`candidate-${y}`}
+                      className={`seg-cut-candidate${selectedLines.includes(y) ? ' seg-cut-candidate--on' : ''}`}
+                      style={{
+                        left: `${(columnRange.x0 / imageSize.width) * 100}%`,
+                        width: `${((columnRange.x1 - columnRange.x0) / imageSize.width) * 100}%`,
+                        top: `${(y / imageSize.height) * 100}%`
+                      }}
+                    >
+                      <span className="seg-cut-candidate__label">{i + 1}</span>
+                    </div>
+                  ))}
+                </>
+              )}
               {draftRect && (
                 <span
                   className="seg-draft"
@@ -672,10 +951,58 @@ const SegmentSheet = ({ image, db, onSelectCharacter, onClose }) => {
                 加框
               </button>
             )}
+            <button
+              className={`btn btn--ghost${cutMode ? ' seg-btn--active' : ''}`}
+              onClick={toggleCutMode}
+              disabled={selectedIndex === null && !cutMode}
+            >
+              切线
+            </button>
+            <button className="btn btn--ghost" onClick={handleUndo} disabled={historyDepth === 0}>
+              <FaUndo size={13} />
+              撤销
+            </button>
             {editedBoxes && (
               <button className="btn btn--text" onClick={handleResetEdit}>
                 还原
               </button>
+            )}
+            {cutMode && (
+              <div className="seg-cut-bar">
+                <button
+                  className="btn btn--ghost"
+                  onClick={handleFindCandidates}
+                  disabled={!columnRange || profilePending}
+                >
+                  {profilePending ? '分析中…' : '找候选线'}
+                </button>
+                <div className="seg-cut-chips">
+                  {candidateLines.length === 0 ? (
+                    <span className="seg-cut-bar__hint">
+                      候选线只来自本列：点编号选取，应用后按所选切线重切本列
+                    </span>
+                  ) : (
+                    candidateLines.map((y, i) => (
+                      <button
+                        key={y}
+                        className={`seg-cut-chip${selectedLines.includes(y) ? ' seg-cut-chip--on' : ''}`}
+                        onClick={() => toggleCandidateLine(y)}
+                        aria-label={`候选线 ${i + 1}`}
+                        aria-pressed={selectedLines.includes(y)}
+                      >
+                        {i + 1}
+                      </button>
+                    ))
+                  )}
+                </div>
+                <button
+                  className="btn btn--primary"
+                  onClick={handleApplyCuts}
+                  disabled={selectedLines.length === 0}
+                >
+                  应用{selectedLines.length > 0 ? ` (${selectedLines.length})` : ''}
+                </button>
+              </div>
             )}
           </div>
         ) : (

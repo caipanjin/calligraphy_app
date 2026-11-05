@@ -28,13 +28,26 @@
 
 ### 手动编辑切分框
 
+自动切分不可能 100% 准确，编辑态提供逐字修正：
+
 | 操作 | 用途 |
 |---|---|
 | 删除 | 去掉多余的框（如底部残块）|
 | 合并 | 一个字被切成两框 |
 | 拆分 | 一个框装了多个字 |
 | **加框** | 补切分漏掉的字 —— 支持**单击生成默认大小的框**（尺寸参考同列字）或**拖拽画框** |
+| **拖动 / 拉边角** | 直接移动框、单独调整四条边，每个字的高度独立 |
+| **本列切线** | 选中一列任意框后开启；拖动公共边界切线，上下两框同步、不重叠不留缝 |
+| **找候选线** | 只按**本列**行投影低谷给出「可能」的字间切线，点编号选取后重切本列 |
+| 撤销 | 逐步回退连续调整（最多 20 步）|
 | 还原 | 回到自动切分结果 |
+
+> 设计边界：无格书法（尤其行书）各列字数、字距、字高都可能不同，同位字未必对齐，
+> 字内笔画间隙甚至比字间还宽（实测某字内部 18px，另一列真字间只有 9~12px）。
+> 因此编辑能力**一律只作用于本列、由人判断**，不做跨列对齐、不按字数等距重排，
+> 候选线只作建议。实测一张 4 列行书字帖同位字字心极差最大 157px（17.8% 图高）、
+> 字间空白 -4~43px（含框重叠与连写穿插）。
+> 编辑结果写入 `:manual` 缓存并永久豁免算法版本，不触碰自动切分算法与 golden 快照。
 
 ### 单字临摹
 
@@ -146,7 +159,7 @@
 ```bash
 npm install --legacy-peer-deps      # react-image-magnifiers 的 peer 依赖需放宽
 npm run dev                          # 开发服务器（端口 5199）
-npm test                             # 136 项单元测试
+npm test                             # 169 项单元测试
 npm run build                        # 生产构建
 ```
 
@@ -165,33 +178,35 @@ npm run android:open  # 打开 Android Studio
 
 ```bash
 node scripts/test-segment.mjs            # 切分算法纯函数 50 项
-node scripts/test-boxedit.mjs            # 框编辑 11 项
+node scripts/test-boxedit.mjs            # 框编辑 34 项
+node scripts/test-inkprofile.mjs         # 本列候选切线 9 项
 node scripts/test-cache.mjs              # 缓存清理 5 项
 node scripts/test-segment-version.mjs    # 缓存算法版本 18 项
 node scripts/test-practice.mjs           # 练习记录 7 项
 node scripts/test-wechat.mjs             # 公众号提取 24 项
 node scripts/test-clipboard.mjs          # 剪贴板 12 项
-node scripts/test-segment-fixtures.mjs   # 真实图 golden 快照 9 项
+node scripts/test-segment-fixtures.mjs   # 真实图 golden 快照 10 项
 ```
 
 ### 真实图 golden 夹具
 
 `src/utils/segment.js` 导出的 `segmentFromMasks(ink, faint, options)` 是纯计算入口，
 `segmentCharacters` 只负责图像解码与参数透传，两者共用同一条切分链路。
-`scripts/fixtures/segment/` 存放 6 套真实字帖的位压缩墨迹/格线掩码与逐框快照
-（共 7 个 case，含无格自由切分与格线模式），测试直接调用 `segmentFromMasks` 比对。
+`scripts/fixtures/segment/` 存放 7 套真实字帖的位压缩墨迹/格线掩码与逐框快照
+（共 8 个 case，含无格自由切分与格线模式），测试直接调用 `segmentFromMasks` 比对。
 
 覆盖场景包括：「石」字部件合并、两个独立「一」、方格字帖、真实拍照、密集格线、
-整张界面截图，以及红底双联（`couplet-vertical`，两列中心距 0.483W，曾因字距
-搜索上限 0.4W 被误拆成 6 列）。放宽判据另用 25 张 `docs/screens/` 截图做过
-新旧全链路逐框对比，确认除该对联外零变化。`couplet-vertical / free` 与 `yi-grid / grid`
-记录的是已知缺陷现状（左联下半按列宽均分导致错位、水平格线漏检一半），
-将来修好时会触发差异，需有意更新快照。
+整张界面截图、红底双联（`couplet-vertical`，两列中心距 0.483W，曾因字距
+搜索上限 0.4W 被误拆成 6 列），以及 4 列无格行书（`cursive-vertical`，各列字数
+5/4/4/4、字位与字高都不对齐，用来守住「不做跨列对齐 / 等距推断」的边界）。
+放宽判据另用 25 张 `docs/screens/` 截图做过新旧全链路逐框对比，确认除该对联外零变化。
+`couplet-vertical / free` 与 `yi-grid / grid` 记录的是已知缺陷现状（左联下半按列宽
+均分导致错位、水平格线漏检一半），将来修好时会触发差异，需有意更新快照。
 
 改动任何切分参数后测试会精确报出「哪张图、第几框、期望值与实际值」；
 若确有意为之，用 `node scripts/test-segment-fixtures.mjs --update` 更新快照。
 掩码由 `scripts/gen-segment-fixtures.py` 生成（需要 Pillow + numpy，仅用于再生成，
-不参与 `npm test`）；原始字帖图不进仓库，三套取自本机 Downloads，其余取自 `docs/screens/`。
+不参与 `npm test`）；原始字帖图不进仓库，四套取自本机 Downloads，其余取自 `docs/screens/`。
 
 ---
 
@@ -204,13 +219,14 @@ src/
   components/
     Library.jsx            字帖库（卡片、进度条）
     PracticeView.jsx       临摹页（图片模式 + 单字模式）
-    SegmentSheet.jsx       切分面板（编辑、加框、画框）
+    SegmentSheet.jsx       切分面板（拖动、切线、加框、撤销）
     ImportSheet.jsx        公众号导入（粘贴链接、图片选择）
     ClipboardBanner.jsx    剪贴板导入提示条
     SettingsView.jsx       设置页（主题、统计、开关）
   utils/
     segment.js             切分算法核心
-    boxEdit.js             框编辑（增删合并拆分）
+    boxEdit.js             框编辑（增删合并拆分、平移缩放、本列切线）
+    inkProfile.js          本列行投影低谷 → 候选切线（只做建议）
     segmentCache.js        切分缓存读写
     practiceStore.js       练习记录
     wechatArticle.js       公众号图片提取 + 视觉去重
@@ -221,7 +237,7 @@ src/
 
 openspec/changes/          各轮改动的设计记录与踩坑总结
 scripts/                   单元测试、夹具生成与 golden 快照
-  fixtures/segment/        6 套真实字帖的位压缩掩码与逐框快照
+  fixtures/segment/        7 套真实字帖的位压缩掩码与逐框快照
 docs/screens/              界面截图
 ```
 
@@ -239,7 +255,8 @@ docs/screens/              界面截图
 ## 已知限制
 
 - **微信抓取有频率限制**：短时间多次请求会被限流，需等待 1~2 分钟
-- **密集粘连字帖切分不准**：字与字连笔时投影法无法可靠分开（如行草），需手动编辑
+- **密集粘连字帖切分不准**：字与字连笔时投影法无法可靠分开（如行草），需在编辑态用
+  「本列切线 / 候选线」逐字修正；无格字帖的字位错落不做自动推断
 - **「用其他应用打开」列表可能不含本应用**：微信的筛选规则不透明，建议用「复制链接 → 粘贴导入」
 - **iOS 剪贴板授权弹窗**：每次读取剪贴板 iOS 都会弹「允许粘贴」，可在
   设置 → 应用 → 从其他 App 粘贴 → 改为「允许」后不再提示

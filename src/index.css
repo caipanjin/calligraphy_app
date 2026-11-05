@@ -1125,6 +1125,8 @@ button {
   overflow: hidden;
   background: var(--surface-2);
   line-height: 0;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .seg-preview img {
@@ -1233,6 +1235,157 @@ button {
   background: color-mix(in srgb, var(--accent) 34%, transparent);
   border-color: var(--accent);
   outline: none;
+}
+
+/* ---- 编辑态：框可整体拖动，选中框显示 8 个手柄 ---- */
+/* 放在 .seg-box--editable 之后，覆盖原来的 pointer 光标 */
+.seg-box--editable {
+  cursor: grab;
+  touch-action: none;
+}
+.seg-box--editable:active {
+  cursor: grabbing;
+}
+
+.seg-handle {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  border: 1.5px solid var(--surface);
+  border-radius: 3px;
+  background: var(--accent);
+  touch-action: none;
+  z-index: 5;
+}
+.seg-handle--nw { left: -7px; top: -7px; cursor: nwse-resize; }
+.seg-handle--ne { right: -7px; top: -7px; cursor: nesw-resize; }
+.seg-handle--sw { left: -7px; bottom: -7px; cursor: nesw-resize; }
+.seg-handle--se { right: -7px; bottom: -7px; cursor: nwse-resize; }
+.seg-handle--n {
+  left: 30%; width: 40%; height: 9px; top: -5px;
+  border-radius: 2px; cursor: ns-resize;
+}
+.seg-handle--s {
+  left: 30%; width: 40%; height: 9px; bottom: -5px;
+  border-radius: 2px; cursor: ns-resize;
+}
+.seg-handle--w {
+  top: 30%; height: 40%; width: 9px; left: -5px;
+  border-radius: 2px; cursor: ew-resize;
+}
+.seg-handle--e {
+  top: 30%; height: 40%; width: 9px; right: -5px;
+  border-radius: 2px; cursor: ew-resize;
+}
+
+/* ---- 本列公共边界切线（只覆盖选中列，不做跨列对齐） ---- */
+.seg-cut-line {
+  position: absolute;
+  height: 3px;
+  margin-top: -1px;
+  background: var(--accent);
+  border-radius: 2px;
+  cursor: ns-resize;
+  touch-action: none;
+  z-index: 4;
+}
+.seg-cut-line::before {
+  content: '';
+  position: absolute;
+  inset: -10px 0;
+}
+.seg-cut-line::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: -4px;
+  width: 10px;
+  height: 10px;
+  margin-left: -5px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 1.5px solid var(--surface);
+}
+
+.seg-cut-candidate {
+  position: absolute;
+  height: 0;
+  border-top: 2px dashed var(--ink-3);
+  pointer-events: none;
+  z-index: 3;
+}
+.seg-cut-candidate--on {
+  border-top-style: solid;
+  border-top-color: var(--accent);
+}
+.seg-cut-candidate__label {
+  position: absolute;
+  right: -22px;
+  top: -9px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 3px;
+  line-height: 16px;
+  text-align: center;
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink-2);
+  border: 1px solid var(--line-strong);
+  font-size: 11px;
+}
+.seg-cut-candidate--on .seg-cut-candidate__label {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+
+.seg-btn--active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.seg-cut-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  width: 100%;
+  margin-top: 4px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+.seg-cut-bar .btn {
+  flex: 0 0 auto;
+  min-width: 84px;
+  min-height: 36px;
+}
+.seg-cut-chips {
+  display: flex;
+  flex: 1 1 140px;
+  gap: 6px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.seg-cut-bar__hint {
+  font-size: 11.5px;
+  color: var(--ink-2);
+  line-height: 1.4;
+}
+.seg-cut-chip {
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+  color: var(--ink-2);
+  font-size: 12px;
+  cursor: pointer;
+}
+.seg-cut-chip--on {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
 }
 
 /* 抽屉内的空状态 / 错误态 */
