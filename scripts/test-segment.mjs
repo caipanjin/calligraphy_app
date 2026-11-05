@@ -15,7 +15,10 @@ import {
   detectGridLines,
   boxesFromGridLines,
   measureGlyphHorizontally,
-  measureGlyphVertically
+  measureGlyphVertically,
+  releaseImageElement,
+  buildInkMask,
+  segmentCharacters
 } from '../src/utils/segment.js';
 import { hashImageData } from '../src/utils/imageHash.js';
 
@@ -550,6 +553,138 @@ check('切分结果必须包含 imageWidth/imageHeight（原图尺寸）', () =>
   const src = fs.readFileSync(new URL('../src/utils/segment.js', import.meta.url), 'utf8');
   assert.ok(/imageWidth:\s*img\.naturalWidth/.test(src), 'imageWidth 应取 img.naturalWidth');
   assert.ok(/imageHeight:\s*img\.naturalHeight/.test(src), 'imageHeight 应取 img.naturalHeight');
+});
+
+check('释放临时位图：清空 src 并解绑回调', () => {
+  const img = { src: 'data:image/jpeg;base64,xxx', onload: () => {}, onerror: () => {} };
+  releaseImageElement(img);
+  assert.equal(img.src, '');
+  assert.equal(img.onload, null);
+  assert.equal(img.onerror, null);
+});
+
+check('释放临时位图：空值与只读 src 都不抛错', () => {
+  releaseImageElement(null);
+  releaseImageElement(undefined);
+  const stubborn = {};
+  Object.defineProperty(stubborn, 'src', {
+    set() { throw new Error('read-only'); }
+  });
+  assert.doesNotThrow(() => releaseImageElement(stubborn));
+});
+
+check('segmentCharacters 用完必须释放位图，并把掩码交给 onMask 复用', () => {
+  const src = fs.readFileSync(new URL('../src/utils/segment.js', import.meta.url), 'utf8');
+  const body = src.slice(src.indexOf('export const segmentCharacters'));
+  assert.ok(/try\s*\{[\s\S]*segmentFromMasks/.test(body), '切分计算应包在 try 内');
+  assert.ok(/finally\s*\{[\s\S]*releaseImageElement\(img\)/.test(body), 'finally 必须释放 img');
+  assert.ok(/options\.onMask/.test(body), '应支持把掩码交给调用方复用');
+  const onMaskBlock = body.slice(body.indexOf('options.onMask'), body.indexOf('return segmentFromMasks'));
+  assert.ok(/ink:\s*mask\.ink/.test(onMaskBlock) && !/faint/.test(onMaskBlock),
+    '交给 onMask 的掩码只应含 ink，不能把 faint 一起常驻');
+});
+
+check('buildInkMask 结束前释放 canvas 的 backing store', () => {
+  const src = fs.readFileSync(new URL('../src/utils/segment.js', import.meta.url), 'utf8');
+  const body = src.slice(src.indexOf('export const buildInkMask'), src.indexOf('export const projectColumns'));
+  assert.ok(/canvas\.width\s*=\s*0/.test(body) && /canvas\.height\s*=\s*0/.test(body),
+    '返回前应把 canvas 尺寸置 0');
+  assert.ok(body.indexOf('canvas.width = 0') < body.indexOf('return mask'), '释放必须发生在 return 之前');
+});
+
+check('切分面板：取尺寸后释放位图，并接入 onMask 复用', () => {
+  const src = fs.readFileSync(new URL('../src/components/SegmentSheet.jsx', import.meta.url), 'utf8');
+  assert.ok(/finally\s*\{[\s\S]{0,120}releaseImageElement\(img\)/.test(src), '取尺寸的 Image 必须释放');
+  assert.ok(/onMask:\s*\(mask\)/.test(src) && /maskRef\.current\s*=\s*mask/.test(src),
+    '切分时应把掩码存入 maskRef');
+  assert.ok(/return\s*\(\)\s*=>\s*\{[\s\S]{0,160}maskRef\.current\s*=\s*null/.test(src),
+    '组件卸载时要清空 maskRef');
+});
+
+check('缩略图降级路径用完也释放全尺寸位图', () => {
+  const src = fs.readFileSync(new URL('../src/utils/thumbnail.js', import.meta.url), 'utf8');
+  const body = src.slice(src.indexOf('const makeThumbnailFallback'), src.indexOf('export const makeThumbnails'));
+  assert.ok(/finally\s*\{[\s\S]{0,400}?img\.src\s*=\s*''/.test(body), 'onload 分支必须释放');
+  assert.ok(/img\.onerror[\s\S]{0,120}img\.src\s*=\s*''/.test(body), 'onerror 分支也要释放');
+});
+
+const checkAsync = async (name, fn) => {
+  try {
+    await fn();
+    passed += 1;
+    console.log(`PASS  ${name}`);
+  } catch (error) {
+    console.log(`FAIL  ${name} — ${error.message}`);
+    process.exitCode = 1;
+  }
+};
+
+/** 给解码链路造一个最小 DOM：全白 8x4 图，记录所有 canvas / Image 实例 */
+const withMockDom = async (fn) => {
+  const prevDoc = globalThis.document;
+  const prevImage = globalThis.Image;
+  const canvases = [];
+  const images = [];
+  globalThis.document = {
+    createElement: () => {
+      const canvas = {
+        width: 0,
+        height: 0,
+        getContext: () => ({
+          drawImage() {},
+          getImageData: (x, y, w, h) => ({ data: new Uint8ClampedArray(w * h * 4).fill(255) })
+        })
+      };
+      canvases.push(canvas);
+      return canvas;
+    }
+  };
+  globalThis.Image = class {
+    constructor() {
+      this.naturalWidth = 8;
+      this.naturalHeight = 4;
+      this.onload = null;
+      this.onerror = null;
+      this._src = '';
+      images.push(this);
+    }
+    set src(value) {
+      this._src = value;
+      if (value) queueMicrotask(() => this.onload && this.onload());
+    }
+    get src() { return this._src; }
+  };
+  try {
+    return await fn({ canvases, images });
+  } finally {
+    if (prevDoc === undefined) delete globalThis.document;
+    else globalThis.document = prevDoc;
+    if (prevImage === undefined) delete globalThis.Image;
+    else globalThis.Image = prevImage;
+  }
+};
+
+await checkAsync('真实解码链路：释放 canvas 与位图后掩码/结果仍完整，onMask 只拿精简掩码', async () => {
+  await withMockDom(async ({ canvases, images }) => {
+    const direct = buildInkMask({ naturalWidth: 8, naturalHeight: 4 }, 8);
+    assert.equal(direct.ink.length, 32, 'ink 应在 canvas 释放后仍可读');
+    assert.equal(direct.faint.length, 32);
+    assert.equal(canvases[0].width, 0, 'canvas 应已释放');
+
+    let captured = null;
+    const result = await segmentCharacters('data:image/png;base64,x', {
+      onMask: (mask) => { captured = mask; }
+    });
+    // 全白合成图没有墨迹，走的是 empty 失败路径（该路径本就不返回 imageWidth，
+    // 成功路径的 imageWidth 取值时机由上面的静态断言守住）。
+    assert.equal(result.failed, true);
+    assert.ok(Array.isArray(result.boxes));
+    assert.ok(captured && captured.ink instanceof Uint8Array, 'onMask 应收到掩码');
+    assert.equal(captured.faint, undefined, 'onMask 不应携带 faint');
+    assert.equal(images[0].src, '', '临时 Image 应被清空');
+    assert.equal(images[0].onload, null);
+    assert.equal(canvases[1].width, 0, '切分用的 canvas 也应释放');
+  });
 });
 
 console.log(`\n${passed} 项通过`);

@@ -8,7 +8,7 @@
  * 墨迹掩码复用自动切分链路里已导出的 buildInkMask / projectRows，
  * 保证候选线与自动切分看到的是同一份二值图像；不改切分算法本身。
  */
-import { loadImageElement, buildInkMask, projectRows } from './segment.js';
+import { loadImageElement, buildInkMask, projectRows, releaseImageElement } from './segment.js';
 
 const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
 
@@ -106,7 +106,18 @@ export const findValleys = (profile, options = {}) => {
  * @returns {Promise<{boundaries:number[], mask:Object, valleys:Array}>}
  */
 export const getCandidateBoundaries = async (imageSrc, options = {}) => {
-  const mask = options.mask || buildInkMask(await loadImageElement(imageSrc));
+  let mask = options.mask;
+  if (!mask) {
+    // 缓存命中自动切分时拿不到 mask，才会走这里。用完立刻释放位图，
+    // 并把结果裁成精简结构，避免把整份 faint 掩码留在编辑器里。
+    const img = await loadImageElement(imageSrc);
+    try {
+      const full = buildInkMask(img);
+      mask = { width: full.width, height: full.height, scale: full.scale, ink: full.ink };
+    } finally {
+      releaseImageElement(img);
+    }
+  }
   const s = mask.scale > 0 ? mask.scale : 1;
   const ax0 = clamp(Math.round((options.x0 ?? 0) * s), 0, mask.width - 1);
   const ax1 = clamp(Math.round((options.x1 ?? mask.width / s) * s), ax0 + 1, mask.width);

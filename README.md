@@ -159,7 +159,7 @@
 ```bash
 npm install --legacy-peer-deps      # react-image-magnifiers 的 peer 依赖需放宽
 npm run dev                          # 开发服务器（端口 5199）
-npm test                             # 169 项单元测试
+npm test                             # 178 项单元测试
 npm run build                        # 生产构建
 ```
 
@@ -177,9 +177,9 @@ npm run android:open  # 打开 Android Studio
 ### 测试
 
 ```bash
-node scripts/test-segment.mjs            # 切分算法纯函数 50 项
+node scripts/test-segment.mjs            # 切分算法纯函数 57 项
 node scripts/test-boxedit.mjs            # 框编辑 34 项
-node scripts/test-inkprofile.mjs         # 本列候选切线 9 项
+node scripts/test-inkprofile.mjs         # 本列候选切线 11 项
 node scripts/test-cache.mjs              # 缓存清理 5 项
 node scripts/test-segment-version.mjs    # 缓存算法版本 18 项
 node scripts/test-practice.mjs           # 练习记录 7 项
@@ -257,6 +257,11 @@ docs/screens/              界面截图
 - **微信抓取有频率限制**：短时间多次请求会被限流，需等待 1~2 分钟
 - **密集粘连字帖切分不准**：字与字连笔时投影法无法可靠分开（如行草），需在编辑态用
   「本列切线 / 候选线」逐字修正；无格字帖的字位错落不做自动推断
+- **iOS 大图仍可能触发内存终止**：字帖以完整 base64 常驻内存（最多 20 张），临摹页与
+  切分面板又会各持一份原图解码位图。已做的控制：临时 `Image` / canvas 用完即释放、
+  候选线复用切分算出的掩码（不再二次解码原图）、字帖库只渲染 240px 缩略图。
+  4000px 级超大图仍建议少量导入；进一步降常驻需把 IndexedDB 改成「只存元数据、
+  按需读原图」（涉及 DB 版本迁移），尚未实施
 - **「用其他应用打开」列表可能不含本应用**：微信的筛选规则不透明，建议用「复制链接 → 粘贴导入」
 - **iOS 剪贴板授权弹窗**：每次读取剪贴板 iOS 都会弹「允许粘贴」，可在
   设置 → 应用 → 从其他 App 粘贴 → 改为「允许」后不再提示

@@ -39,6 +39,24 @@ export const loadImageElement = (src) =>
     img.src = src;
   });
 
+/**
+ * 释放临时 Image 持有的解码位图。
+ *
+ * 原图动辄 4000x4500，单份解码就要 74MB；切分链路里若不主动释放，
+ * iOS WKWebView 会把这些位图留在解码缓存里，多份叠加会被系统 jetsam 杀掉。
+ * 必须在读完 naturalWidth/naturalHeight 之后调用——清空 src 后这两个值会变 0。
+ */
+export const releaseImageElement = (img) => {
+  if (!img) return;
+  try {
+    img.onload = null;
+    img.onerror = null;
+    img.src = '';
+  } catch (error) {
+    /* 个别 WebView 不允许清空 src，忽略即可 */
+  }
+};
+
 /** Otsu 阈值 */
 export const otsuThreshold = (histogram, total) => {
   let sum = 0;
@@ -135,7 +153,12 @@ export const buildInkMask = (img, maxSize = MAX_ANALYSIS_SIZE) => {
     }
   }
 
-  return { width, height, ink, faint, threshold, scale: width / naturalWidth };
+  const mask = { width, height, ink, faint, threshold, scale: width / naturalWidth };
+  // 释放 canvas 的 backing store：分析图 1600px 长边时约 10MB，
+  // 且 iOS 上这块显存/内存不会随函数返回立刻归还。
+  canvas.width = 0;
+  canvas.height = 0;
+  return mask;
 };
 
 /** 垂直投影：每一列有多少墨迹像素 */
@@ -1360,21 +1383,37 @@ export const segmentFromMasks = (
 /**
  * 主入口：把整幅字帖切成一个个单字
  * 只负责图像解码与掩码构建，计算交给 segmentFromMasks
+ * options.onMask 可选回调：把只含 ink 的精简掩码交给调用方复用，
+ * 避免编辑器找候选线时再解码一次整张原图（iOS 上单份可达 74MB）
  * @returns {Promise<{boxes: Array, layout: string, columns: number, scale: number, failed: boolean, reason?: string}>}
  */
 export const segmentCharacters = async (imageSrc, options = {}) => {
   const { maxSize = MAX_ANALYSIS_SIZE } = options;
   const img = await loadImageElement(imageSrc);
-  const { width, height, ink, faint, scale } = buildInkMask(img, maxSize);
-  return segmentFromMasks(ink, faint, {
-    width,
-    height,
-    scale,
-    // 必须直接取 img 的真实尺寸 —— 用 width/scale 反推会有 1~2px 舍入误差，
-    // 导致与 naturalWidth 严格相等判断失败、缓存永不命中。
-    imageWidth: img.naturalWidth || img.width,
-    imageHeight: img.naturalHeight || img.height,
-    layout: options.layout,
-    hasGrid: options.hasGrid
-  });
+  try {
+    const mask = buildInkMask(img, maxSize);
+    // 把候选线需要的掩码交给调用方复用，避免编辑器再解码一次原图。
+    // 只传 ink：faint 只有自动切分用得上，常驻会白占一份 1600px 级缓冲。
+    if (typeof options.onMask === 'function') {
+      options.onMask({
+        width: mask.width,
+        height: mask.height,
+        scale: mask.scale,
+        ink: mask.ink
+      });
+    }
+    return segmentFromMasks(mask.ink, mask.faint, {
+      width: mask.width,
+      height: mask.height,
+      scale: mask.scale,
+      // 必须直接取 img 的真实尺寸 —— 用 width/scale 反推会有 1~2px 舍入误差，
+      // 导致与 naturalWidth 严格相等判断失败、缓存永不命中。
+      imageWidth: img.naturalWidth || img.width,
+      imageHeight: img.naturalHeight || img.height,
+      layout: options.layout,
+      hasGrid: options.hasGrid
+    });
+  } finally {
+    releaseImageElement(img);
+  }
 };

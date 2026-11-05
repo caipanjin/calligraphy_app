@@ -1,6 +1,7 @@
 /** 本列候选切线（findValleys 纯函数）的单元测试 */
 import assert from 'node:assert/strict';
-import { findValleys } from '../src/utils/inkProfile.js';
+import fs from 'node:fs';
+import { findValleys, getCandidateBoundaries } from '../src/utils/inkProfile.js';
 
 let passed = 0;
 const check = (name, fn) => {
@@ -86,6 +87,44 @@ check('不修改输入的投影数组', () => {
   const before = Array.from(p);
   findValleys(p);
   assert.deepEqual(Array.from(p), before);
+});
+
+check('无 mask 分支：解码后必须释放位图，且只保留精简掩码', () => {
+  const src = fs.readFileSync(new URL('../src/utils/inkProfile.js', import.meta.url), 'utf8');
+  const body = src.slice(src.indexOf('export const getCandidateBoundaries'));
+  assert.ok(/let mask = options\.mask/.test(body), '应优先复用传入的 mask');
+  assert.ok(/if\s*\(!mask\)/.test(body), '只有拿不到 mask 时才解码原图');
+  assert.ok(/finally\s*\{[\s\S]{0,120}releaseImageElement\(img\)/.test(body), '解码后必须释放位图');
+  const build = body.slice(body.indexOf('const full = buildInkMask'), body.indexOf('finally'));
+  assert.ok(/ink:\s*full\.ink/.test(build) && !/faint/.test(build),
+    '交给编辑器常驻的精简掩码不应含 faint');
+});
+
+const checkAsync = async (name, fn) => {
+  try {
+    await fn();
+    passed += 1;
+    console.log(`PASS  ${name}`);
+  } catch (error) {
+    console.log(`FAIL  ${name} — ${error.message}`);
+    process.exitCode = 1;
+  }
+};
+
+await checkAsync('复用 mask 时完全不碰图片解码（一旦解码，Node 里没有 Image 就会抛错）', async () => {
+  const ink = new Uint8Array(100 * 200);
+  [[20, 60], [90, 130]].forEach(([y0, y1]) => {
+    for (let y = y0; y < y1; y += 1) {
+      for (let x = 10; x < 90; x += 1) ink[y * 100 + x] = 1;
+    }
+  });
+  const mask = { width: 100, height: 200, scale: 1, ink };
+  const result = await getCandidateBoundaries('不会用到的图片地址', {
+    mask, x0: 0, x1: 100, y0: 0, y1: 200
+  });
+  assert.ok(Array.isArray(result.boundaries), '应返回候选线数组');
+  assert.ok(result.boundaries.length >= 1, `应找到字间低谷，实际 ${result.boundaries.length}`);
+  assert.equal(result.mask, mask, '应原样复用传入的 mask 对象');
 });
 
 console.log(`\n${passed} 项通过`);

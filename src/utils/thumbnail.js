@@ -134,9 +134,21 @@ const makeThumbnailFallback = (dataUrl) => {
         resolve(thumb);
       } catch (error) {
         resolve(dataUrl);
+      } finally {
+        // 降级路径会全尺寸解码原图，用完必须释放；
+        // 批量生成时若不释放，20 张 74MB 位图会同时滞留在解码缓存里。
+        // 先解绑回调，避免清空 src 触发的 load/error 再次进入这里
+        img.onload = null;
+        img.onerror = null;
+        img.src = '';
       }
     };
-    img.onerror = () => resolve(dataUrl);
+    img.onerror = () => {
+      img.onload = null;
+      img.onerror = null;
+      img.src = '';
+      resolve(dataUrl);
+    };
     img.src = dataUrl;
   });
 };

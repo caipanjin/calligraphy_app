@@ -12,7 +12,7 @@ import {
   FaPlus,
   FaUndo
 } from 'react-icons/fa';
-import { segmentCharacters } from '../utils/segment';
+import { segmentCharacters, releaseImageElement } from '../utils/segment';
 import { hashImageData } from '../utils/imageHash';
 import {
   readSegmentation,
@@ -92,6 +92,10 @@ const SegmentSheet = ({ image, db, onSelectCharacter, onClose }) => {
     setHistoryDepth(0);
     historyRef.current = [];
     maskRef.current = null;
+    return () => {
+      // 组件卸载（关闭切分面板）时也要放开掩码：1600px 级 ink 缓冲约 2~3MB
+      maskRef.current = null;
+    };
   }, [image]);
 
   // 先恢复这张字帖上次的版面设置与「是否带格子线」
@@ -132,13 +136,20 @@ const SegmentSheet = ({ image, db, onSelectCharacter, onClose }) => {
         setStatus('loading');
         const img = new Image();
         img.src = image;
-        await new Promise((resolve, reject) => {
-          img.onload = resolve;
-          img.onerror = () => reject(new Error('图片加载失败'));
-        });
+        let naturalWidth;
+        let naturalHeight;
+        try {
+          await new Promise((resolve, reject) => {
+            img.onload = resolve;
+            img.onerror = () => reject(new Error('图片加载失败'));
+          });
+          naturalWidth = img.naturalWidth || img.width;
+          naturalHeight = img.naturalHeight || img.height;
+        } finally {
+          // 这份位图只为取尺寸，读完就释放，别和预览/切分的副本一起驻留
+          releaseImageElement(img);
+        }
         if (cancelled) return;
-        const naturalWidth = img.naturalWidth || img.width;
-        const naturalHeight = img.naturalHeight || img.height;
         setImageSize({ width: naturalWidth, height: naturalHeight });
 
         const cacheKey = `${hashImageData(image)}:${layout}:${hasGrid ? 'grid' : 'free'}`;
@@ -175,7 +186,15 @@ const SegmentSheet = ({ image, db, onSelectCharacter, onClose }) => {
           }
         }
 
-        const segmentation = await segmentCharacters(image, { layout, hasGrid });
+        const segmentation = await segmentCharacters(image, {
+          layout,
+          hasGrid,
+          // 复用切分算出的墨迹掩码：点「找候选线」时不再二次解码整张原图
+          onMask: (mask) => {
+            if (cancelled) return;
+            maskRef.current = mask;
+          }
+        });
         if (cancelled) return;
 
         setResult(segmentation);
