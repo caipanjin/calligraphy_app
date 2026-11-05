@@ -8,6 +8,7 @@ import {
   findBands,
   otsuThreshold,
   estimatePitch,
+  needsWidePitchSearch,
   buildGridBoxes,
   splitTallGlyphs,
   mergeSplitGlyphs,
@@ -97,6 +98,89 @@ check('字距估计：周期 50 的投影', () => {
   for (let i = 0; i < 600; i += 1) profile[i] = i % 50 < 25 ? 80 : 3;
   const { pitch } = estimatePitch(profile, 0.05, 0.4);
   assert.ok(Math.abs(pitch - 50) <= 1, `pitch=${pitch}`);
+});
+
+// 双联 / 条幅：两列中心距接近半幅图宽（实测 0.483W）。默认上限 0.4W
+// 会把真实周期排除，锁到笔画级短周期 65px，导致 splitBandsByPitch 把
+// 两条宽列各拆成 3 条窄列。以下用真实图还原的列带验证自适应放宽。
+const coupletBands = [{ start: 127, end: 299 }, { start: 521, end: 691 }];
+const coupletProfile = new Float32Array(813);
+for (const [start, end] of [[127, 299], [521, 691]]) {
+  for (let i = start; i < end; i += 1) coupletProfile[i] = 90;
+}
+
+check('双联：needsWidePitchSearch 命中真实对联列带', () => {
+  assert.equal(needsWidePitchSearch(coupletBands, 813), true);
+});
+
+check('双联：放宽上限后能估出真实列周期 393', () => {
+  const ratio = needsWidePitchSearch(coupletBands, 813) ? 0.55 : 0.4;
+  const { pitch, score } = estimatePitch(coupletProfile, 0.08, ratio);
+  assert.ok(Math.abs(pitch - 393) <= 5, `pitch=${pitch}，应接近两列中心距 393`);
+  assert.ok(score > 0.4, `score=${score}，真实周期应有明显自相关峰`);
+});
+
+check('双联：旧上限 0.4 仍会锁到短周期（说明放宽的必要性）', () => {
+  const { pitch } = estimatePitch(coupletProfile, 0.08, 0.4);
+  assert.ok(pitch < 100, `pitch=${pitch}，旧上限下应在笔画级短周期`);
+});
+
+check('放宽判据：单条全宽列带不放宽（导入面板缩略图网格）', () => {
+  // 实测 34-import-sheet：一条覆盖整幅的列带，放宽后在 0.47W 锁到伪周期
+  assert.equal(needsWidePitchSearch([{ start: 0, end: 739 }], 739), false);
+});
+
+check('放宽判据：两列过宽不放宽（并排卡片界面）', () => {
+  // 实测 11-library-dark：两条 330px 宽列带
+  assert.equal(
+    needsWidePitchSearch([{ start: 40, end: 370 }, { start: 391, end: 721 }], 739),
+    false
+  );
+});
+
+check('放宽判据：两列宽度悬殊不放宽（一侧边框 / 题款）', () => {
+  // 实测 28-glyph-width：450 / 116
+  assert.equal(
+    needsWidePitchSearch([{ start: 20, end: 470 }, { start: 500, end: 616 }], 739),
+    false
+  );
+});
+
+check('放宽判据：列心距在旧上限内不放宽', () => {
+  assert.equal(
+    needsWidePitchSearch([{ start: 100, end: 270 }, { start: 380, end: 550 }], 813),
+    false
+  );
+});
+
+check('放宽判据：列心距超过 0.55W 也不放宽（放宽也覆盖不到）', () => {
+  assert.equal(
+    needsWidePitchSearch([{ start: 20, end: 190 }, { start: 650, end: 820 }], 813),
+    false
+  );
+});
+
+check('双联：segmentFromMasks 必须把自适应上限接进真实编排', () => {
+  // 纯函数判据测不出「判据写对了却没接到主链路」这种回归，
+  // 这里静态守住调用点；真实逐框结果由 couplet-vertical 夹具覆盖。
+  const src = fs.readFileSync(new URL('../src/utils/segment.js', import.meta.url), 'utf8');
+  assert.ok(
+    /needsWidePitchSearch\(rawColBands,\s*W\)\s*\?\s*0\.55\s*:\s*0\.4/.test(src),
+    '主链路应按双联形态选择 0.55 / 0.4 的搜索上限'
+  );
+  assert.ok(
+    /estimatePitch\(colProfile,\s*0\.08,\s*maxPitchRatio\)/.test(src),
+    '估计字距时应使用动态上限，而非写死的默认值'
+  );
+});
+
+check('字距估计：默认上限仍是 0.4W，常规多列周期不受影响', () => {
+  const q = new Float32Array(600);
+  for (let i = 0; i < 600; i += 1) q[i] = i % 50 < 25 ? 80 : 3;
+  const s = new Float32Array(400);
+  for (let i = 0; i < 400; i += 1) s[i] = i % 20 < 10 ? 100 : 5;
+  assert.ok(Math.abs(estimatePitch(q).pitch - 50) <= 1, '周期 50 应保持不变');
+  assert.ok(Math.abs(estimatePitch(s).pitch - 40) <= 1, '周期 20 的二次谐波应保持不变');
 });
 
 check('网格拟合：3 列 × 2 行，竖排从右往左', () => {

@@ -92,6 +92,10 @@
 关键参数：
 
 - 相对阈值：90 分位 × `INK_RATIO=0.15`，配 3 点平滑，抗噪
+- 字距自相关的搜索上限默认 **40% 图宽**；仅当列投影呈「双联形态」（恰好两条窄列带、
+  宽度接近、列心距在 0.4W~0.55W 之间）时放宽到 **55%**，否则真实列周期会被排除、
+  锁到笔画级短周期并把两联误拆成 6 列。判据刻意收紧：导入面板缩略图网格等重复图案
+  在 0.47W 附近有更强伪周期，全局放宽会把多列并成一列
 - 扩展上限同时受「列宽 60%」与「相邻墨迹空隙 45%」约束
   —— 字距密集的字帖上，只按列宽比例扩展会吞并邻字
 - 上下扩展分别用 `gapUp` / `gapDown`，避免末字被上方空隙限制
@@ -142,7 +146,7 @@
 ```bash
 npm install --legacy-peer-deps      # react-image-magnifiers 的 peer 依赖需放宽
 npm run dev                          # 开发服务器（端口 5199）
-npm test                             # 125 项单元测试
+npm test                             # 136 项单元测试
 npm run build                        # 生产构建
 ```
 
@@ -160,27 +164,34 @@ npm run android:open  # 打开 Android Studio
 ### 测试
 
 ```bash
-node scripts/test-segment.mjs            # 切分算法纯函数 40 项
+node scripts/test-segment.mjs            # 切分算法纯函数 50 项
 node scripts/test-boxedit.mjs            # 框编辑 11 项
 node scripts/test-cache.mjs              # 缓存清理 5 项
 node scripts/test-segment-version.mjs    # 缓存算法版本 18 项
 node scripts/test-practice.mjs           # 练习记录 7 项
 node scripts/test-wechat.mjs             # 公众号提取 24 项
 node scripts/test-clipboard.mjs          # 剪贴板 12 项
-node scripts/test-segment-fixtures.mjs   # 真实图 golden 快照 8 项
+node scripts/test-segment-fixtures.mjs   # 真实图 golden 快照 9 项
 ```
 
 ### 真实图 golden 夹具
 
 `src/utils/segment.js` 导出的 `segmentFromMasks(ink, faint, options)` 是纯计算入口，
 `segmentCharacters` 只负责图像解码与参数透传，两者共用同一条切分链路。
-`scripts/fixtures/segment/` 存放 5 套真实字帖的位压缩墨迹/格线掩码与逐框快照
-（共 6 个 case，含无格自由切分与格线模式），测试直接调用 `segmentFromMasks` 比对。
+`scripts/fixtures/segment/` 存放 6 套真实字帖的位压缩墨迹/格线掩码与逐框快照
+（共 7 个 case，含无格自由切分与格线模式），测试直接调用 `segmentFromMasks` 比对。
+
+覆盖场景包括：「石」字部件合并、两个独立「一」、方格字帖、真实拍照、密集格线、
+整张界面截图，以及红底双联（`couplet-vertical`，两列中心距 0.483W，曾因字距
+搜索上限 0.4W 被误拆成 6 列）。放宽判据另用 25 张 `docs/screens/` 截图做过
+新旧全链路逐框对比，确认除该对联外零变化。`couplet-vertical / free` 与 `yi-grid / grid`
+记录的是已知缺陷现状（左联下半按列宽均分导致错位、水平格线漏检一半），
+将来修好时会触发差异，需有意更新快照。
 
 改动任何切分参数后测试会精确报出「哪张图、第几框、期望值与实际值」；
 若确有意为之，用 `node scripts/test-segment-fixtures.mjs --update` 更新快照。
 掩码由 `scripts/gen-segment-fixtures.py` 生成（需要 Pillow + numpy，仅用于再生成，
-不参与 `npm test`）；原始字帖图不进仓库，前两套取自本机 Downloads，其余取自 `docs/screens/`。
+不参与 `npm test`）；原始字帖图不进仓库，三套取自本机 Downloads，其余取自 `docs/screens/`。
 
 ---
 
@@ -210,7 +221,7 @@ src/
 
 openspec/changes/          各轮改动的设计记录与踩坑总结
 scripts/                   单元测试、夹具生成与 golden 快照
-  fixtures/segment/        5 套真实字帖的位压缩掩码与逐框快照
+  fixtures/segment/        6 套真实字帖的位压缩掩码与逐框快照
 docs/screens/              界面截图
 ```
 

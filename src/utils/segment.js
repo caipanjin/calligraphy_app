@@ -300,7 +300,8 @@ const median = (values) => {
 
 /**
  * 用列投影的自相关估计「字距」（一个字占的宽度）
- * 搜索范围限制在图宽的 8%~40%，避免锁到笔画级的周期性
+ * 搜索范围默认限制在图宽的 8%~40%，避免锁到笔画级或图案级的周期性。
+ * 双联等宽间隔版式由 needsWidePitchSearch 判定后传入更大的上限。
  */
 export const estimatePitch = (profile, minRatio = 0.08, maxRatio = 0.4) => {
   const n = profile.length;
@@ -333,6 +334,31 @@ export const estimatePitch = (profile, minRatio = 0.08, maxRatio = 0.4) => {
     }
   }
   return { pitch: bestLag, score: bestScore };
+};
+
+/**
+ * 是否需要放宽字距搜索上限到 0.55W。
+ *
+ * 双联 / 条幅只有两列、列心距接近半幅图宽，真实列周期会落在 0.4W 之外；
+ * 旧上限把真实周期排除后，自相关只能锁到笔画级短周期，splitBandsByPitch
+ * 会把两条宽列各拆成 3 条窄列，整条链路失效。
+ *
+ * 但不能全局放宽：导入面板缩略图网格、界面截图这类重复图案会在 0.47W
+ * 附近形成更强的伪周期，反而把多列并成一列。因此只在同时满足以下条件时放宽：
+ *   1. 恰好两条列带；
+ *   2. 每条都明显窄于整幅（<0.3W）——排除一条覆盖全宽的图案列带；
+ *   3. 两条宽度接近（>=60%）——排除一侧是边框/题款的不对称版式；
+ *   4. 列心距落在 (0.4W, 0.55W) ——正好是旧上限漏掉、放宽后能覆盖的区间。
+ */
+export const needsWidePitchSearch = (bands, W) => {
+  if (!Array.isArray(bands) || bands.length !== 2 || !(W > 0)) return false;
+  const [a, b] = bands;
+  const widthA = a.end - a.start;
+  const widthB = b.end - b.start;
+  if (Math.max(widthA, widthB) > W * 0.3) return false;
+  if (Math.min(widthA, widthB) < Math.max(widthA, widthB) * 0.6) return false;
+  const centers = ((b.start + b.end) - (a.start + a.end)) / 2;
+  return centers > W * 0.4 && centers < W * 0.55;
 };
 
 /**
@@ -1049,7 +1075,6 @@ export const segmentFromMasks = (
   const minSizeRow = Math.max(2, Math.round(H * MIN_SIZE_RATIO));
 
   const colProfile = projectColumns(ink, W, H);
-  const { pitch } = estimatePitch(colProfile);
 
   // 列带先用投影找，再用字距把粘连的多列拆开
   const rawColBands = findBands(colProfile, {
@@ -1057,6 +1082,9 @@ export const segmentFromMasks = (
     minGap: gapCol,
     minSize: minSizeCol
   });
+  // 仅双联 / 条幅形态放宽上限，其余版式保持 0.4W（避免锁到缩略图网格等伪周期）
+  const maxPitchRatio = needsWidePitchSearch(rawColBands, W) ? 0.55 : 0.4;
+  const { pitch } = estimatePitch(colProfile, 0.08, maxPitchRatio);
   const colBands = splitBandsByPitch(rawColBands, pitch);
 
   const rowBands = findBands(projectRows(ink, W, H), {

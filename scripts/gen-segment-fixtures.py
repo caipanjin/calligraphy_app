@@ -8,8 +8,8 @@
   - faint：7x7 邻域（步长 3）灰度中位数减当前灰度 > 6，且当前不是墨迹
 位压缩：每像素 1 bit，行优先、MSB first，与 test-segment-fixtures.mjs 的 unpack 对应。
 
-注意：原始字帖图片不进仓库。前两套来自本机 Downloads，需保证文件仍在；
-其余三套来自仓库内 docs/screens/ 的界面截图（按固定矩形裁剪）。
+注意：原始字帖图片不进仓库。其中三套来自本机 Downloads（两张字帖 + 一张对联），
+需保证文件仍在；其余三套来自仓库内 docs/screens/ 的界面截图（按固定矩形裁剪）。
 faint 的邻域中位数在距边缘 7px 内用 nanmedian 近似 JS 的「丢弃越界样本后
 取上中位数」，格线均在图像内部，不影响检测结果。
 
@@ -65,6 +65,20 @@ FIXTURES = [
         "source": "docs/screens/22-segment-real-photo.png",
         "crop": None,
         "note": "整张界面截图 780x1690，含标题栏、按钮、边框等大量非字帖干扰，用于退化检测与碎片过滤回归。",
+        "cases": [{"id": "free", "layout": "vertical", "hasGrid": False}],
+    },
+    {
+        "name": "couplet-vertical",
+        "source": "~/Downloads/微信图片_2026-11-05_112243_931.jpg",
+        "crop": None,
+        "note": (
+            "红底撒金对联 970x1910，左「天門日觀遙相開」右「岱宗之巔何壯哉」，每联 7 字，"
+            "含左侧题款/印章。两列中心距 393px = 0.483W，曾因 estimatePitch 上限 0.4W "
+            "被误拆成 6 列、切出 117 个小框；现由 needsWidePitchSearch 判定双联形态后"
+            "放宽上限。当前快照为 15 框 / 2 联：右联 7 框准确，"
+            "左联 8 框是已知缺陷——下半字间隙 9~12px < minGap 13px 被并成长带后按列宽均分，"
+            "与字位错开。修复该缺陷时此快照会触发差异，需 --update。"
+        ),
         "cases": [{"id": "free", "layout": "vertical", "hasGrid": False}],
     },
 ]
