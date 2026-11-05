@@ -2,9 +2,40 @@
  * 切分结果的本地缓存（IndexedDB）
  *
  * 大图切分需要 2 秒左右，同一张字帖反复打开没必要重算。
- * 缓存键 = 图片内容哈希 + 版面模式（竖排/横排各自一份）。
+ * 缓存键 = 图片内容哈希 + 版面模式（竖排/横排各自一份），
+ * 算法版本存在记录里（见 SEGMENT_ALGORITHM_VERSION），不写进键，
+ * 这样旧缓存会在重算时被同键覆盖，不会留下一批永不命中的孤儿记录。
  */
 export const SEGMENT_STORE = 'segmentations';
+
+/**
+ * 切分算法版本。
+ *
+ * 任何会改变「同一张图切出哪些框」的改动（src/utils/segment.js），
+ * 都必须把这里 +1，否则用户装了新版仍会命中旧算法留下的缓存。
+ *
+ *   v1 = 历史版本：记录里没有 algorithmVersion 字段
+ *   v2 = mergeSplitGlyphs 扁部件合并修复之后（含「石」字被切成两字的修复）
+ */
+export const SEGMENT_ALGORITHM_VERSION = 2;
+
+const MANUAL_SUFFIX = ':manual';
+
+/** 该记录是否由当前算法产出（旧记录没有版本字段，一律视为过期） */
+export const isCurrentSegmentation = (record) =>
+  Boolean(record) && record.algorithmVersion === SEGMENT_ALGORITHM_VERSION;
+
+/**
+ * 能否直接复用这条缓存，省掉一次重算。
+ *
+ * 手动结果是用户亲手确认的最终框，与算法版本无关，永远保留；
+ * 自动结果必须严格匹配当前算法版本。
+ */
+export const canReuseSegmentation = (record, key) => {
+  if (!record || !Array.isArray(record.boxes) || record.boxes.length === 0) return false;
+  if (String(key).endsWith(MANUAL_SUFFIX)) return true;
+  return isCurrentSegmentation(record);
+};
 
 const withStore = (db, mode, fn) => {
   if (!db) return null;
@@ -33,7 +64,13 @@ export const writeSegmentation = (db, key, payload) =>
     // 之前误把 store 当成 transaction，导致 oncomplete 永远不触发，
     // 依赖它完成的逻辑（如关闭面板前等待保存）会一直挂起。
     const transaction = withStore(db, 'readwrite', (store, tx) => {
-      store.put({ id: key, ...payload, savedAt: Date.now() });
+      // 版本号放在最后，调用方无法覆盖：所有写入（含手动结果）都带当前算法版本。
+      store.put({
+        id: key,
+        ...payload,
+        algorithmVersion: SEGMENT_ALGORITHM_VERSION,
+        savedAt: Date.now()
+      });
       return tx;
     });
     if (!transaction || typeof transaction.addEventListener !== 'function') {

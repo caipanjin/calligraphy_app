@@ -18,7 +18,8 @@ import {
   writeSegmentation,
   deleteSegmentation,
   readSettings,
-  writeSettings
+  writeSettings,
+  canReuseSegmentation
 } from '../utils/segmentCache';
 import { removeBox, mergeBoxes, splitBox, findNearestBoxIndex, addBox } from '../utils/boxEdit';
 import { deleteImagePractice, readImagePractice } from '../utils/practiceStore';
@@ -103,18 +104,21 @@ const SegmentSheet = ({ image, db, onSelectCharacter, onClose }) => {
         setImageSize({ width: naturalWidth, height: naturalHeight });
 
         const cacheKey = `${hashImageData(image)}:${layout}:${hasGrid ? 'grid' : 'free'}`;
+        const manualKey = `${cacheKey}:manual`;
 
         // 命中缓存直接复用（点「重新切分」时强制重算）
         if (attempt === 0) {
-          // 优先用户的手动结果
-          const manual = await readSegmentation(db, `${cacheKey}:manual`);
+          // 优先用户的手动结果：用户亲手确认过的框不因算法升级而丢失
+          const manual = await readSegmentation(db, manualKey);
           if (cancelled) return;
-          if (manual && manual.boxes && manual.boxes.length > 0 && manual.imageWidth === naturalWidth) {
+          if (canReuseSegmentation(manual, manualKey) && manual.imageWidth === naturalWidth) {
+            // 自动结果只用来显示切分策略；旧算法的自动结果不能混进手动结果
             const autoCached = await readSegmentation(db, cacheKey);
+            const currentAuto = canReuseSegmentation(autoCached, cacheKey) ? autoCached : null;
             setResult({
-              boxes: autoCached && autoCached.boxes ? autoCached.boxes : manual.boxes,
+              boxes: currentAuto ? currentAuto.boxes : manual.boxes,
               layout: manual.layout || 'vertical',
-              strategy: (autoCached && autoCached.strategy) || 'manual'
+              strategy: (currentAuto && currentAuto.strategy) || 'manual'
             });
             setEditedBoxes(manual.boxes);
             setSelectedIndex(null);
@@ -124,7 +128,7 @@ const SegmentSheet = ({ image, db, onSelectCharacter, onClose }) => {
 
           const cached = await readSegmentation(db, cacheKey);
           if (cancelled) return;
-          if (cached && cached.boxes && cached.boxes.length > 0 && cached.imageWidth === naturalWidth) {
+          if (canReuseSegmentation(cached, cacheKey) && cached.imageWidth === naturalWidth) {
             setResult({ boxes: cached.boxes, layout: cached.layout, strategy: cached.strategy });
             setEditedBoxes(null);
             setSelectedIndex(null);

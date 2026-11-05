@@ -17,7 +17,12 @@ import {
   getPreviousCharacterPosition,
   isHiddenPosition
 } from '../utils/charNav';
-import { readSegmentation, readSettings, writeSegmentation } from '../utils/segmentCache';
+import {
+  readSegmentation,
+  readSettings,
+  writeSegmentation,
+  canReuseSegmentation
+} from '../utils/segmentCache';
 import {
   recordPractice,
   readPractice,
@@ -155,9 +160,11 @@ const PracticeView = ({
 
       let found = null;
       for (const key of preferredKeys) {
-        const manual = await readSegmentation(db, `${key}:manual`);
+        const manualKey = `${key}:manual`;
+        const manual = await readSegmentation(db, manualKey);
         if (cancelled) return;
-        if (manual && manual.boxes && manual.boxes.length > 0) {
+        // 手动结果豁免算法版本校验，优先于任何自动结果
+        if (canReuseSegmentation(manual, manualKey)) {
           found = {
             boxes: manual.boxes,
             layout: manual.layout || 'vertical',
@@ -168,7 +175,8 @@ const PracticeView = ({
         }
         const auto = await readSegmentation(db, key);
         if (cancelled) return;
-        if (auto && auto.boxes && auto.boxes.length > 0) {
+        // 旧算法的自动结果不复用；这里返回 null 会触发下方的重新切分
+        if (canReuseSegmentation(auto, key)) {
           found = {
             boxes: auto.boxes,
             layout: auto.layout || 'vertical',
@@ -416,7 +424,8 @@ const PracticeView = ({
       if (index === null || index < 0 || !db || !cacheKeyRef.current) return;
       const key = cacheKeyRef.current;
       const existing = await readSegmentation(db, key);
-      if (!existing) return;
+      // 旧算法的自动结果不能写回：否则会被注入当前版本号，等于把它洗白成新结果
+      if (!canReuseSegmentation(existing, key)) return;
 
       const nextBoxes = (existing.boxes || []).map((box, i) =>
         i === index

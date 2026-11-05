@@ -559,7 +559,10 @@ const App = () => {
       items.map(async (item) => {
         const imageHash = hashImageData(item.url);
 
-        // 优先取手动调整结果，其次任意版面的自动结果
+        // 优先取手动调整结果，其次任意版面的自动结果。
+        // 这里刻意不做算法版本校验：进度分母只是个字数，
+        // 旧缓存过期时沿用旧值，好过让升级后所有字帖的分母突然变 0；
+        // 用户打开该字帖触发重算后，分母会自然更新。
         let total = 0;
         for (const variant of variants) {
           const manual = await readSegmentation(db, `${imageHash}:${variant}:manual`);

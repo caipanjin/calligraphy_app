@@ -26,6 +26,11 @@ const MAX_SIZE_RATIO = 0.85;
 // 判定为「多个字粘在一起」的倍数（相对中位字高/宽）
 const MERGE_FACTOR = 1.85;
 
+// 注意：若本文件的改动会改变「同一张图切出哪些框」，
+// 必须把 src/utils/segmentCache.js 的 SEGMENT_ALGORITHM_VERSION +1，
+// 否则用户装了新版仍会命中旧算法缓存，看不到新结果。
+// 有真实图 golden 夹具（npm test）守住输出，升级版本时按需更新快照。
+
 export const loadImageElement = (src) =>
   new Promise((resolve, reject) => {
     const img = new Image();

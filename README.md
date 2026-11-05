@@ -101,13 +101,24 @@
 | Store | 键 | 内容 |
 |---|---|---|
 | `images` | `current` / `recent_N` | 字帖图片（data URL）|
-| `segmentations` | `{hash}:{layout}:{grid\|free}[:manual]` | 切分框、版面、单字调整 |
+| `segmentations` | `{hash}:{layout}:{grid\|free}[:manual]` | 切分框、版面、单字调整、算法版本 |
 | `segmentationSettings` | 图片哈希 | 版面模式、是否带格子线 |
 | `practiceRecords` | `{hash}:{字索引}` | 练习次数、时间 |
 | `practiceDaily` | `YYYY-MM-DD` | 每日练习汇总 |
 
 **`boxes` 是切分框的唯一数据源**：单字页的缩放/位移调整会直接写回切分框
 （并打 `adjusted` 标记，后续进入不再额外加 padding）。
+
+### 切分缓存的算法版本
+
+每条切分缓存都带 `algorithmVersion`。打开字帖时只复用与当前版本一致的**自动**结果，
+旧算法留下的记录会静默重算并**同键覆盖**（不产生孤儿键，也无需手动点「重新切分」）；
+**手动调整过的框**（键以 `:manual` 结尾）是用户亲手确认的最终结果，不受版本影响，永久保留。
+
+> 改动 `src/utils/segment.js` 里任何会改变「同一张图切出哪些框」的逻辑后，
+> 必须把 `segmentCache.js` 的 `SEGMENT_ALGORITHM_VERSION` **+1**，
+> 否则用户装了新版仍会命中旧缓存、看不到新结果。
+> 改完跑 `npm test`：golden 夹具会把输出变化精确到「哪张图、第几框」，按需 `--update` 更新快照。
 
 ### 公众号抓取
 
@@ -131,7 +142,7 @@
 ```bash
 npm install --legacy-peer-deps      # react-image-magnifiers 的 peer 依赖需放宽
 npm run dev                          # 开发服务器（端口 5199）
-npm test                             # 107 项单元测试
+npm test                             # 125 项单元测试
 npm run build                        # 生产构建
 ```
 
@@ -152,6 +163,7 @@ npm run android:open  # 打开 Android Studio
 node scripts/test-segment.mjs            # 切分算法纯函数 40 项
 node scripts/test-boxedit.mjs            # 框编辑 11 项
 node scripts/test-cache.mjs              # 缓存清理 5 项
+node scripts/test-segment-version.mjs    # 缓存算法版本 18 项
 node scripts/test-practice.mjs           # 练习记录 7 项
 node scripts/test-wechat.mjs             # 公众号提取 24 项
 node scripts/test-clipboard.mjs          # 剪贴板 12 项
