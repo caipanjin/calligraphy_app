@@ -1,7 +1,7 @@
 {
       "name": "calligraphy-app",
       "private": true,
-      "version": "1.1.0",
+      "version": "1.3.0",
       "type": "module",
       "scripts": {
             "start": "vite --host 0.0.0.0",
