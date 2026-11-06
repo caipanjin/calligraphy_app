@@ -9,6 +9,9 @@ import {
   otsuThreshold,
   estimatePitch,
   needsWidePitchSearch,
+  isSingleWideColumn,
+  isNegligibleEdgeBand,
+  mergeNarrowGaps,
   buildGridBoxes,
   splitTallGlyphs,
   mergeSplitGlyphs,
@@ -184,6 +187,136 @@ check('字距估计：默认上限仍是 0.4W，常规多列周期不受影响',
   for (let i = 0; i < 400; i += 1) s[i] = i % 20 < 10 ? 100 : 5;
   assert.ok(Math.abs(estimatePitch(q).pitch - 50) <= 1, '周期 50 应保持不变');
   assert.ok(Math.abs(estimatePitch(s).pitch - 40) <= 1, '周期 20 的二次谐波应保持不变');
+});
+
+// 531×1080 黑底「我則」拓片：单列带 [69,489] 宽 420、行带高 491/433、pitch 锁到 42
+check('单列大字：命中真实拓片几何量（带宽 420 / 字高 462 / pitch 42）', () => {
+  assert.equal(
+    isSingleWideColumn(
+      [{ start: 69, end: 489 }],
+      [{ start: 43, end: 534 }, { start: 608, end: 1041 }],
+      531,
+      42
+    ),
+    true
+  );
+});
+
+check('单列大字：多列、窄列、无字距都不误判', () => {
+  const rows = [{ start: 43, end: 534 }, { start: 608, end: 1041 }];
+  assert.equal(isSingleWideColumn([{ start: 20, end: 200 }, { start: 300, end: 480 }], rows, 531, 42), false);
+  assert.equal(isSingleWideColumn([{ start: 20, end: 200 }], rows, 531, 42), false, '带宽不足半幅');
+  assert.equal(isSingleWideColumn([{ start: 69, end: 489 }], [], 531, 42), false, '没有行带');
+  assert.equal(isSingleWideColumn([{ start: 69, end: 489 }], rows, 531, 0), false, '没有字距');
+});
+
+// 541×1082 黑底大字拓片：主带 [69,495] 宽 426、右侧纸边 [533,541] 仅 8px、pitch 43
+check('贴边细带：纸边不算列，单列大字判据仍命中（真实几何量）', () => {
+  assert.equal(
+    isSingleWideColumn(
+      [{ start: 69, end: 495 }, { start: 533, end: 541 }],
+      [{ start: 43, end: 501 }, { start: 589, end: 1027 }],
+      541,
+      43
+    ),
+    true
+  );
+});
+
+check('贴边细带：只忽略又细又贴边的带，不误删真实列', () => {
+  assert.equal(isNegligibleEdgeBand({ start: 533, end: 541 }, 541), true, '右侧 8px 纸边');
+  assert.equal(isNegligibleEdgeBand({ start: 0, end: 8 }, 541), true, '左边缘同样忽略');
+  assert.equal(isNegligibleEdgeBand({ start: 250, end: 258 }, 541), false, '图中间的细带不算纸边');
+  assert.equal(isNegligibleEdgeBand({ start: 528, end: 536 }, 541), false, '离右边缘还有距离');
+  assert.equal(isNegligibleEdgeBand({ start: 511, end: 541 }, 541), false, '30px 已超过 5%W');
+  assert.equal(isNegligibleEdgeBand(null, 541), false, '空带不崩');
+});
+
+check('贴边细带：剔除后仍有两条实质列带时不命中', () => {
+  const rows = [{ start: 43, end: 501 }, { start: 589, end: 1027 }];
+  assert.equal(
+    isSingleWideColumn(
+      [{ start: 20, end: 200 }, { start: 300, end: 480 }, { start: 533, end: 541 }],
+      rows,
+      541,
+      43
+    ),
+    false
+  );
+  assert.equal(isSingleWideColumn([{ start: 533, end: 541 }], rows, 541, 43), false, '只剩细带');
+});
+
+// 527×1090 黑底「作我」拓片：8px 投影低谷把列带劈成 [59,229] / [237,474]，pitch 锁到 211
+check('窄间隙列带：合并后判为单列大字（真实几何量，pitch 211）', () => {
+  assert.equal(
+    isSingleWideColumn(
+      [{ start: 59, end: 229 }, { start: 237, end: 474 }],
+      [{ start: 51, end: 483 }, { start: 574, end: 1023 }],
+      527,
+      211
+    ),
+    true
+  );
+});
+
+check('窄间隙列带：只合并 2%W 以内的间隙，不并真实两列', () => {
+  const bands = [{ start: 59, end: 229 }, { start: 237, end: 474 }];
+  const snapshot = JSON.stringify(bands);
+  assert.deepEqual(mergeNarrowGaps(bands, 527), [{ start: 59, end: 474 }], '8px 低谷应合并');
+  assert.equal(JSON.stringify(bands), snapshot, '不得改动传入的列带对象');
+  assert.equal(mergeNarrowGaps([{ start: 59, end: 229 }, { start: 240, end: 474 }], 527).length, 2, '11px > 2%W 不合并');
+  assert.deepEqual(mergeNarrowGaps([{ start: 0, end: 100 }, { start: 105, end: 200 }, { start: 208, end: 300 }], 527),
+    [{ start: 0, end: 300 }], '连续窄间隙应逐级合并');
+  assert.deepEqual(mergeNarrowGaps([], 527), []);
+  assert.deepEqual(mergeNarrowGaps(null, 527), []);
+  const rows = [{ start: 51, end: 483 }, { start: 574, end: 1023 }];
+  assert.equal(isSingleWideColumn([{ start: 59, end: 229 }, { start: 300, end: 474 }], rows, 527, 211), false,
+    '真实两列的宽间隙不会被合并');
+});
+
+check('窄间隙列带：未发生合并时「字距接近带宽」的保守条件仍生效', () => {
+  const rows = [{ start: 43, end: 534 }, { start: 608, end: 1041 }];
+  assert.equal(isSingleWideColumn([{ start: 69, end: 489 }], rows, 531, 200), false,
+    'didMerge=false，pitch×2.5 条件必须继续挡住');
+});
+
+check('单列大字：带宽远大于字高时仍允许拆列（整张界面截图 2.93）', () => {
+  const rows = [252, 252, 252, 252].map((h, i) => ({ start: i * 320, end: i * 320 + h }));
+  assert.equal(isSingleWideColumn([{ start: 0, end: 739 }], rows, 739, 59), false);
+});
+
+check('单列大字：字距接近带宽时保留拆列（可能是真实两列）', () => {
+  const rows = [{ start: 43, end: 534 }, { start: 608, end: 1041 }];
+  assert.equal(isSingleWideColumn([{ start: 69, end: 489 }], rows, 531, 200), false);
+});
+
+check('单列大字：segmentFromMasks 必须把判据接进字距决策', () => {
+  // 纯函数判据测不出「判据写对了却没接到主链路」这种回归
+  const src = fs.readFileSync(new URL('../src/utils/segment.js', import.meta.url), 'utf8');
+  assert.ok(
+    /isSingleWideColumn\(rawColBands,\s*rowBands,\s*W,\s*pitchEstimate\.pitch\)/.test(src),
+    '主链路应把原始列带、行带与字距一起交给判据'
+  );
+  assert.ok(
+    /const pitch = singleWideColumn \? 0 : pitchEstimate\.pitch/.test(src),
+    '命中单列大字时字距必须视为 0（同时跳过拆列与网格退化）'
+  );
+  assert.ok(
+    /colBands\.filter\(\(band\) => !isNegligibleEdgeBand\(band, W\)\)/.test(src),
+    '判据必须先剔除贴边细带再数实质列带'
+  );
+  assert.ok(
+    /mergeNarrowGaps\(substantial, W\)/.test(src),
+    '判据必须先合并窄间隙列带再数实质列带'
+  );
+  assert.ok(
+    /if \(!didMerge && bandWidth < pitch \* 2\.5\)/.test(src),
+    '只有发生过合并时才跳过「字距接近带宽」条件'
+  );
+  assert.ok(
+    /const colBands = singleWideColumn\s*\?\s*mergeNarrowGaps\(splitColBands\.filter\(/.test(src),
+    '命中单列大字时最终列带必须同时剔除贴边细带并合并窄间隙'
+  );
 });
 
 check('网格拟合：3 列 × 2 行，竖排从右往左', () => {

@@ -385,6 +385,96 @@ export const needsWidePitchSearch = (bands, W) => {
 };
 
 /**
+ * 是否是「贴边细带」：拓片/照片边缘的浅色纸边、扫描边框在列投影上
+ * 留下的极窄带，既不是笔画也不是一列字。
+ *
+ * 只认「又细又贴边」：宽度 < 5% 图宽，且起点或终点贴到图边缘 0.5% 内。
+ * 真正的窄列（小字边款、题款）不会同时满足这两个条件——实测纸边
+ * 8px / 541W，而最窄的真实字列也在百像素量级。
+ *
+ * @param {{start: number, end: number}} band 列带
+ * @param {number} W 分析图宽
+ */
+export const isNegligibleEdgeBand = (band, W) => {
+  if (!band || !(W > 0)) return false;
+  const width = band.end - band.start;
+  const margin = Math.max(2, W * 0.005);
+  return width < W * 0.05 && (band.start <= margin || band.end >= W - margin);
+};
+
+/**
+ * 合并「窄间隙」相邻列带：投影局部低谷把一列大字劈成左右两半。
+ *
+ * 大字内部（左右结构、长竖笔画之间）会形成一条贯穿全高的投影低谷，
+ * 它并不是真正的列间空白：实测 527×1090 黑底「作我」拓片 x229~237 仅 8px，
+ * 按 y 分桶该区域仍有数百个墨迹像素，只是每列投影值刚好跌破 findBands
+ * 的相对阈值，而 minGap 只有 4px，于是被当成列分界。
+ *
+ * 只合并间隙 < 2% 图宽的相邻带：真实两列之间的空隙远大于字宽的 2%，
+ * 不会被误并。返回新数组，不改动传入的列带对象。
+ *
+ * @param {Array<{start: number, end: number}>} bands 列带
+ * @param {number} W 分析图宽
+ */
+export const mergeNarrowGaps = (bands, W) => {
+  if (!Array.isArray(bands)) return [];
+  const out = [];
+  for (const band of bands) {
+    const last = out[out.length - 1];
+    if (last && band.start - last.end < W * 0.02) last.end = band.end;
+    else out.push({ start: band.start, end: band.end });
+  }
+  return out;
+};
+
+/**
+ * 是否是「单列大字特写」：整幅只写了一列、一两个铺满幅面的大字。
+ *
+ * 这类图（碑帖单字放大、公众号配图）列投影只有一条覆盖大半幅宽的带，
+ * 带内笔画粗且间距规律，自相关会把笔画宽度当成列周期：实测 531×1080 的
+ * 黑底「我則」拓片，带宽 420px、字高 462px，pitch 却锁到 42px，
+ * splitBandsByPitch 把这一列拆成 10 列，splitTallGlyphs 再按 42px 行高
+ * 把两个字等分成 132 个小方块。
+ *
+ * 判据只看几何，不用自相关得分阈值——整张界面截图的得分 0.213 与大字
+ * 特写的 0.171 只差 0.042，阈值太窄；另一张 541×1082 拓片得分高达 0.468，
+ * 更不可能靠得分区分。汉字近方：一条带若真挤了多列，宽度必然明显大于
+ * 典型字高；单列大字则两者相当。实测「带宽/字高」：单列大字 0.91，
+ * 整张界面截图 2.93。
+ *
+ * 拓片纸边还会留下贴边的假列带：541×1082 黑底拓片右侧 [533,541] 仅 8px，
+ * 墨迹只在上半幅。若把这条也算一列，判据便不命中，主带仍会被 43px 的
+ * 笔画级字距拆成 10 列 / 124 框。因此先剔除 isNegligibleEdgeBand 认定的细带，
+ * 再要求恰好剩一条实质列带。
+ *
+ * 大字内部结构还会把一条列带劈成两半（见 mergeNarrowGaps）：527×1090 的
+ * 「作我」拓片被 8px 投影低谷分成 [59,229] / [237,474]，合并后带宽 415px
+ * 与字高 440px 相当。这类图的 pitch 会锁到约半个带宽（实测 211），
+ * 「带宽 ≥ pitch×2.5」的保守条件也会误挡；由于 2%W 以内的间隙本身
+ * 已排除真实两列，只在发生过合并时跳过该条件，未合并的图逻辑完全不变。
+ *
+ * @param {Array<{start: number, end: number}>} colBands 原始列带（未经字距拆分）
+ * @param {Array<{start: number, end: number}>} rowBands 全局行带，估计典型字高
+ * @param {number} W 分析图宽
+ * @param {number} pitch 估计出的字距
+ */
+export const isSingleWideColumn = (colBands, rowBands, W, pitch) => {
+  if (!Array.isArray(colBands) || !(pitch > 0)) return false;
+  const substantial = colBands.filter((band) => !isNegligibleEdgeBand(band, W));
+  const merged = mergeNarrowGaps(substantial, W);
+  const didMerge = merged.length < substantial.length;
+  if (merged.length !== 1) return false;
+  const bandWidth = merged[0].end - merged[0].start;
+  // 单列必须铺满大半幅宽；窄列本来就不会被误拆
+  if (bandWidth < W * 0.5) return false;
+  // 字距接近带宽时可能真是两列；但已合并窄间隙时不作此限制
+  if (!didMerge && bandWidth < pitch * 2.5) return false;
+  const typicalHeight = median(Array.isArray(rowBands) ? rowBands.map((b) => b.end - b.start) : []);
+  // 带宽与字高相当 → 这一带只装得下一列字
+  return typicalHeight > 0 && bandWidth <= typicalHeight * 1.5;
+};
+
+/**
  * 取单个字带在垂直方向上的真实水平范围
  *
  * 同一列里字的宽度常常不一样（实测列宽 65px，而字最宽可达 83px），
@@ -1098,6 +1188,11 @@ export const segmentFromMasks = (
   const minSizeRow = Math.max(2, Math.round(H * MIN_SIZE_RATIO));
 
   const colProfile = projectColumns(ink, W, H);
+  const rowBands = findBands(projectRows(ink, W, H), {
+    relInk: INK_RATIO,
+    minGap: gapRow,
+    minSize: minSizeRow
+  });
 
   // 列带先用投影找，再用字距把粘连的多列拆开
   const rawColBands = findBands(colProfile, {
@@ -1107,14 +1202,17 @@ export const segmentFromMasks = (
   });
   // 仅双联 / 条幅形态放宽上限，其余版式保持 0.4W（避免锁到缩略图网格等伪周期）
   const maxPitchRatio = needsWidePitchSearch(rawColBands, W) ? 0.55 : 0.4;
-  const { pitch } = estimatePitch(colProfile, 0.08, maxPitchRatio);
-  const colBands = splitBandsByPitch(rawColBands, pitch);
-
-  const rowBands = findBands(projectRows(ink, W, H), {
-    relInk: INK_RATIO,
-    minGap: gapRow,
-    minSize: minSizeRow
-  });
+  const pitchEstimate = estimatePitch(colProfile, 0.08, maxPitchRatio);
+  // 单列大字特写里列投影的周期性来自笔画而非列间距：字距视为 0，
+  // 既不拆列，也不触发后面的网格退化回退（否则整幅会被切成笔画级小方格）
+  const singleWideColumn = isSingleWideColumn(rawColBands, rowBands, W, pitchEstimate.pitch);
+  const pitch = singleWideColumn ? 0 : pitchEstimate.pitch;
+  const splitColBands = splitBandsByPitch(rawColBands, pitch);
+  // 命中单列大字时剔除贴边细带、把窄间隙劈开的两半并回一列，
+  // 否则它们会被当成第二列继续切框
+  const colBands = singleWideColumn
+    ? mergeNarrowGaps(splitColBands.filter((band) => !isNegligibleEdgeBand(band, W)), W)
+    : splitColBands;
 
   // 版面判定：
   // 1) 只有一列（多行）→ 竖排；只有一行（多列）→ 横排
@@ -1324,6 +1422,8 @@ export const segmentFromMasks = (
     pitchInSource: Math.round(pitch / scale),
     columns: colBands.length,
     rawColumns: rawColBands.length,
+    singleWideColumn,
+    edgeBands: rawColBands.filter((band) => isNegligibleEdgeBand(band, W)).length,
     columnDetail
   };
   if (pitch > 0) {

@@ -1,0 +1,73 @@
+{
+  "name": "big-glyph-narrow-gap",
+  "source": "~/Downloads/微信图片_2026-11-06_230146_777.jpg",
+  "crop": null,
+  "note": "黑底白字碑帖拓片「作我」527x1090，单列 2 个大字，笔画几乎顶到左右边缘，右下角有公众号水印。v6 修复目标图：列投影在 x229~237 出现 8px 局部低谷（该区域按 y 分桶仍有大量墨迹，并非列间空白），跌破 findBands 相对阈值且 8px > minGap 4px，把一条列带劈成 [59,229] / [237,474] 两条；isSingleWideColumn 看到 2 条实质列带不命中，pitch=211 / score=0.3，即使合并带宽 415 < 211x2.5 也会被保守条件挡住，旧结果为 2 列 7 框。现由 mergeNarrowGaps 合并 gap < 2%W 的相邻带，且只在发生合并时跳过 pitchx2.5 条件，竖排 1 列 2 框。free 与 grid 两个 case 守住有格开关不改变结果（格线检测为 none）。横排返回切分失败，与另两张大字拓片一致。已知缺陷：框 x=[57,476] 左右各裁 55/51px（首字）与 16/2px（次字），框外墨迹 2.2%/0.7%，「作」的长撇起笔略被切；字框水平扩展受相邻空隙约束，修它会同时改变另两张图的快照，需有意更新。",
+  "width": 527,
+  "height": 1090,
+  "scale": 1,
+  "imageWidth": 527,
+  "imageHeight": 1090,
+  "threshold": 122,
+  "inkRatio": 0.2141,
+  "faintRatio": 0,
+  "inverted": true,
+  "inkFile": "big-glyph-narrow-gap.ink.bin",
+  "faintFile": "big-glyph-narrow-gap.faint.bin",
+  "cases": [
+    {
+      "id": "free",
+      "options": {
+        "layout": "vertical",
+        "hasGrid": false
+      },
+      "expected": {
+        "strategy": "projection",
+        "layout": "vertical",
+        "failed": false,
+        "columns": 1,
+        "boxes": [
+          {
+            "x": 57,
+            "y": 48,
+            "w": 419,
+            "h": 444
+          },
+          {
+            "x": 57,
+            "y": 571,
+            "w": 419,
+            "h": 463
+          }
+        ]
+      }
+    },
+    {
+      "id": "grid",
+      "options": {
+        "layout": "vertical",
+        "hasGrid": true
+      },
+      "expected": {
+        "strategy": "projection",
+        "layout": "vertical",
+        "failed": false,
+        "columns": 1,
+        "boxes": [
+          {
+            "x": 57,
+            "y": 48,
+            "w": 419,
+            "h": 444
+          },
+          {
+            "x": 57,
+            "y": 571,
+            "w": 419,
+            "h": 463
+          }
+        ]
+      }
+    }
+  ]
+}

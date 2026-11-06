@@ -8,7 +8,7 @@
   - faint：7x7 邻域（步长 3）灰度中位数减当前灰度 > 6，且当前不是墨迹
 位压缩：每像素 1 bit，行优先、MSB first，与 test-segment-fixtures.mjs 的 unpack 对应。
 
-注意：原始字帖图片不进仓库。其中四套来自本机 Downloads（三张字帖 + 一张对联），
+注意：原始字帖图片不进仓库。其中七套来自本机 Downloads（含对联与三张黑底拓片），
 需保证文件仍在；其余三套来自仓库内 docs/screens/ 的界面截图（按固定矩形裁剪）。
 faint 的邻域中位数在距边缘 7px 内用 nanmedian 近似 JS 的「丢弃越界样本后
 取上中位数」，格线均在图像内部，不影响检测结果。
@@ -92,6 +92,64 @@ FIXTURES = [
             "free 记录当前自动切分现状 17 框；改动切分算法时会触发差异，需 --update。"
         ),
         "cases": [{"id": "free", "layout": "vertical", "hasGrid": False}],
+    },
+    {
+        "name": "big-glyph-vertical",
+        "source": "~/Downloads/微信图片_2026-11-06_222655_304.jpg",
+        "crop": None,
+        "note": (
+            "黑底白字碑帖拓片「我則」531x1080，单列 2 个大字，右下角有公众号水印。"
+            "修复目标图：列投影只有一条 420px 宽带，自相关把笔画宽 42px 当成字距，"
+            "曾被拆成 10 列 / 132 个 42x45 小框。现由 isSingleWideColumn 依据"
+            "「带宽/字高 0.91」判为单列大字特写，竖排 1 列 2 框。"
+            "free 与 grid 两个 case 守住有格开关不改变结果（格线检测为 none）。"
+        ),
+        "cases": [
+            {"id": "free", "layout": "vertical", "hasGrid": False},
+            {"id": "grid", "layout": "vertical", "hasGrid": True},
+        ],
+    },
+    {
+        "name": "big-glyph-edge-band",
+        "source": "~/Downloads/微信图片_2026-11-06_225217_442.jpg",
+        "crop": None,
+        "note": (
+            "黑底白字碑帖拓片 541x1082，单列 2 个大字，笔画几乎顶到左右边缘，右侧有浅色纸边。"
+            "v5 修复目标图：列投影给出主带 [69,495] 宽 426 与贴边细带 [533,541] 仅 8px"
+            "（墨迹只出现在上半幅，属拓片纸边不是笔画），pitch=43、score=0.468；"
+            "旧判据要求恰好 1 条列带故不命中，主带被拆成 10 列、连同细带共 11 列 / 124 个小框。"
+            "现由 isNegligibleEdgeBand 忽略贴边细带后判为单列大字，竖排 1 列 2 框。"
+            "free 与 grid 两个 case 守住有格开关不改变结果（格线检测为 none）。"
+            "已知缺陷：框 x=[67,497] 左右各裁 67/44px，框外墨迹约 5.4%（含纸边），"
+            "长捺与左侧点被切，字框水平扩展受相邻空隙约束；修它会同时改变 "
+            "big-glyph-vertical 快照，需有意更新。横排模式返回切分失败（两字本就上下排列），"
+            "与 big-glyph-vertical 一致。"
+        ),
+        "cases": [
+            {"id": "free", "layout": "vertical", "hasGrid": False},
+            {"id": "grid", "layout": "vertical", "hasGrid": True},
+        ],
+    },
+    {
+        "name": "big-glyph-narrow-gap",
+        "source": "~/Downloads/微信图片_2026-11-06_230146_777.jpg",
+        "crop": None,
+        "note": (
+            "黑底白字碑帖拓片「作我」527x1090，单列 2 个大字，笔画几乎顶到左右边缘，右下角有公众号水印。"
+            "v6 修复目标图：列投影在 x229~237 出现 8px 局部低谷（该区域按 y 分桶仍有大量墨迹，并非列间空白），"
+            "跌破 findBands 相对阈值且 8px > minGap 4px，把一条列带劈成 [59,229] / [237,474] 两条；"
+            "isSingleWideColumn 看到 2 条实质列带不命中，pitch=211 / score=0.3，即使合并带宽 415 < 211x2.5 "
+            "也会被保守条件挡住，旧结果为 2 列 7 框。现由 mergeNarrowGaps 合并 gap < 2%W 的相邻带，"
+            "且只在发生合并时跳过 pitchx2.5 条件，竖排 1 列 2 框。"
+            "free 与 grid 两个 case 守住有格开关不改变结果（格线检测为 none）。"
+            "横排返回切分失败，与另两张大字拓片一致。"
+            "已知缺陷：框 x=[57,476] 左右各裁 55/51px（首字）与 16/2px（次字），框外墨迹 2.2%/0.7%，"
+            "「作」的长撇起笔略被切；字框水平扩展受相邻空隙约束，修它会同时改变另两张图的快照，需有意更新。"
+        ),
+        "cases": [
+            {"id": "free", "layout": "vertical", "hasGrid": False},
+            {"id": "grid", "layout": "vertical", "hasGrid": True},
+        ],
     },
 ]
 

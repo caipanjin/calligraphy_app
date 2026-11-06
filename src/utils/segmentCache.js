@@ -17,8 +17,11 @@ export const SEGMENT_STORE = 'segmentations';
  *   v1 = 历史版本：记录里没有 algorithmVersion 字段
  *   v2 = mergeSplitGlyphs 扁部件合并修复之后（含「石」字被切成两字的修复）
  *   v3 = 双联形态下把字距搜索上限放宽到 0.55W（两联不再被拆成 6 列）
+ *   v4 = 单列大字特写不再按笔画级字距拆列（两个大字不再被切成 132 个小框）
+ *   v5 = 单列大字判据忽略贴边细带（拓片纸边不再被当成第二列，避免切成 124 个小框）
+ *   v6 = 单列大字判据合并窄间隙列带（字内投影低谷不再把一列劈成两列）
  */
-export const SEGMENT_ALGORITHM_VERSION = 3;
+export const SEGMENT_ALGORITHM_VERSION = 6;
 
 const MANUAL_SUFFIX = ':manual';
 

@@ -1,0 +1,73 @@
+{
+  "name": "big-glyph-vertical",
+  "source": "~/Downloads/微信图片_2026-11-06_222655_304.jpg",
+  "crop": null,
+  "note": "黑底白字碑帖拓片「我則」531x1080，单列 2 个大字，右下角有公众号水印。修复目标图：列投影只有一条 420px 宽带，自相关把笔画宽 42px 当成字距，曾被拆成 10 列 / 132 个 42x45 小框。现由 isSingleWideColumn 依据「带宽/字高 0.91」判为单列大字特写，竖排 1 列 2 框。free 与 grid 两个 case 守住有格开关不改变结果（格线检测为 none）。",
+  "width": 531,
+  "height": 1080,
+  "scale": 1,
+  "imageWidth": 531,
+  "imageHeight": 1080,
+  "threshold": 116,
+  "inkRatio": 0.2675,
+  "faintRatio": 0,
+  "inverted": true,
+  "inkFile": "big-glyph-vertical.ink.bin",
+  "faintFile": "big-glyph-vertical.faint.bin",
+  "cases": [
+    {
+      "id": "free",
+      "options": {
+        "layout": "vertical",
+        "hasGrid": false
+      },
+      "expected": {
+        "strategy": "projection",
+        "layout": "vertical",
+        "failed": false,
+        "columns": 1,
+        "boxes": [
+          {
+            "x": 67,
+            "y": 33,
+            "w": 424,
+            "h": 503
+          },
+          {
+            "x": 67,
+            "y": 598,
+            "w": 422,
+            "h": 448
+          }
+        ]
+      }
+    },
+    {
+      "id": "grid",
+      "options": {
+        "layout": "vertical",
+        "hasGrid": true
+      },
+      "expected": {
+        "strategy": "projection",
+        "layout": "vertical",
+        "failed": false,
+        "columns": 1,
+        "boxes": [
+          {
+            "x": 67,
+            "y": 33,
+            "w": 424,
+            "h": 503
+          },
+          {
+            "x": 67,
+            "y": 598,
+            "w": 422,
+            "h": 448
+          }
+        ]
+      }
+    }
+  ]
+}
