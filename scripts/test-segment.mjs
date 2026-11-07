@@ -12,6 +12,8 @@ import {
   isSingleWideColumn,
   isNegligibleEdgeBand,
   mergeNarrowGaps,
+  isStrokeLevelPitch,
+  maxBoxWidthRatio,
   buildGridBoxes,
   splitTallGlyphs,
   mergeSplitGlyphs,
@@ -298,8 +300,8 @@ check('单列大字：segmentFromMasks 必须把判据接进字距决策', () =>
     '主链路应把原始列带、行带与字距一起交给判据'
   );
   assert.ok(
-    /const pitch = singleWideColumn \? 0 : pitchEstimate\.pitch/.test(src),
-    '命中单列大字时字距必须视为 0（同时跳过拆列与网格退化）'
+    /const pitch = \(singleWideColumn \|\| strokeLevelPitch\) \? 0 : pitchEstimate\.pitch/.test(src),
+    '命中任一伪字距判据时字距必须视为 0（同时跳过拆列与网格退化）'
   );
   assert.ok(
     /colBands\.filter\(\(band\) => !isNegligibleEdgeBand\(band, W\)\)/.test(src),
@@ -316,6 +318,89 @@ check('单列大字：segmentFromMasks 必须把判据接进字距决策', () =>
   assert.ok(
     /const colBands = singleWideColumn\s*\?\s*mergeNarrowGaps\(splitColBands\.filter\(/.test(src),
     '命中单列大字时最终列带必须同时剔除贴边细带并合并窄间隙'
+  );
+});
+
+// 550×1082 黑底「凡厥」拓片：列带 [47,516] 宽 469，量测后框宽 473，
+// 而 0.85W 只有 467.5 —— 两个正确框全被异常块过滤删掉，返回 reason=empty
+check('单列大字：宽度上限只在命中时放宽（真实几何 473 vs 467.5）', () => {
+  assert.equal(maxBoxWidthRatio(false), 0.85);
+  assert.equal(maxBoxWidthRatio(true), 0.95);
+  assert.equal(maxBoxWidthRatio(undefined), 0.85);
+  assert.equal(maxBoxWidthRatio(1), 0.85, '只有严格的布尔 true 才放宽');
+  assert.ok(473 > 550 * maxBoxWidthRatio(false), '旧上限会删掉 473px 的框');
+  assert.ok(473 < 550 * maxBoxWidthRatio(true), '新上限能保留 473px 的框');
+});
+
+check('单列大字：尺寸过滤必须接进主链路，且高度上限保持 0.85H', () => {
+  // helper 测不出「写对了却没接到过滤」或「连高度一起放宽」这两种回归
+  const src = fs.readFileSync(new URL('../src/utils/segment.js', import.meta.url), 'utf8');
+  assert.ok(
+    /const maxW = \(W \/ scale\) \* maxBoxWidthRatio\(singleWideColumn\)/.test(src),
+    '主链路必须用 maxBoxWidthRatio 计算宽度上限'
+  );
+  assert.ok(
+    /const maxH = \(H \/ scale\) \* MAX_SIZE_RATIO/.test(src),
+    '高度上限必须保持 0.85H，不能连「整页一个字」一起放过'
+  );
+  assert.ok(
+    /maxWidthRatio: maxBoxWidthRatio\(singleWideColumn\)/.test(src),
+    'debug 应记录本次实际使用的宽度上限'
+  );
+});
+
+// 523×1068 黑底「翁同龢書」拓片：印章列 [79,210] 宽 131、正文列 [327,463] 宽 136，
+// pitch 锁到 42（只有列宽的 1/3），isSingleWideColumn 因有两条实质列带不命中
+check('笔画级字距：多列版式命中真实几何量（印章列 + 正文列 / pitch 42）', () => {
+  const bands = [{ start: 79, end: 210 }, { start: 327, end: 463 }];
+  assert.equal(isSingleWideColumn(bands, [{ start: 171, end: 344 }], 523, 42), false,
+    '两条独立列带的版式不该由单列大字判据接管');
+  assert.equal(isStrokeLevelPitch(bands, 523, 42), true);
+});
+
+check('笔画级字距：单列、无字距、字距接近列宽都不命中', () => {
+  const bands = [{ start: 79, end: 210 }, { start: 327, end: 463 }];
+  assert.equal(isStrokeLevelPitch([{ start: 0, end: 739 }], 739, 59), false, '只有一条列带必须放行');
+  assert.equal(isStrokeLevelPitch(bands, 523, 0), false, '没有字距');
+  assert.equal(isStrokeLevelPitch(bands, 523, -5), false, '负字距');
+  assert.equal(isStrokeLevelPitch(bands, 0, 42), false, '图宽无效');
+  assert.equal(isStrokeLevelPitch(null, 523, 42), false, '空列带不崩');
+  assert.equal(isStrokeLevelPitch(bands, 523, 79), false, '刚好越过 0.6x131 就不算（严格小于）');
+  assert.equal(isStrokeLevelPitch(bands, 523, 100), false, '字距接近列宽时保留拆列');
+});
+
+check('笔画级字距：细伪带先剔除，不让 8px 纸边废掉判据', () => {
+  assert.equal(
+    isStrokeLevelPitch([{ start: 0, end: 8 }, { start: 79, end: 210 }, { start: 327, end: 463 }], 523, 42),
+    true,
+    '8px < 5%W(26px) 的纸边应被剔除'
+  );
+  assert.equal(
+    isStrokeLevelPitch([{ start: 0, end: 8 }, { start: 79, end: 210 }], 523, 42),
+    false,
+    '剔除细带后只剩一条实质列带，不命中'
+  );
+});
+
+check('笔画级字距：全局置 0 会破坏的夹具几何必须保留拆列', () => {
+  assert.equal(isStrokeLevelPitch(
+    [{ start: 39, end: 131 }, { start: 147, end: 251 }, { start: 257, end: 583 }, { start: 595, end: 699 }],
+    707, 120), false, 'dense-grid：最窄带 92，pitch 120 远大于 0.6x92');
+  assert.equal(isStrokeLevelPitch([{ start: 0, end: 739 }], 739, 59), false, 'full-screenshot：单条宽列带');
+  assert.equal(isStrokeLevelPitch([{ start: 127, end: 299 }, { start: 521, end: 691 }], 813, 388), false,
+    'couplet-vertical：真实双联字距');
+});
+
+check('笔画级字距：segmentFromMasks 必须把判据接进字距决策', () => {
+  // 纯函数判据测不出「判据写对了却没接到主链路」这种回归
+  const src = fs.readFileSync(new URL('../src/utils/segment.js', import.meta.url), 'utf8');
+  assert.ok(
+    /isStrokeLevelPitch\(rawColBands,\s*W,\s*pitchEstimate\.pitch\)/.test(src),
+    '主链路应把原始列带、图宽与估计字距一起交给判据'
+  );
+  assert.ok(
+    /strokeLevelPitch,\s*\n\s*edgeBands:/.test(src),
+    'debug 应记录本次是否命中笔画级字距判据'
   );
 });
 

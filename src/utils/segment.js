@@ -23,6 +23,13 @@ const GAP_RATIO = 0.008;
 const MIN_SIZE_RATIO = 0.015;
 // 单字最大边长占比（超过说明整页被当成一个字）
 const MAX_SIZE_RATIO = 0.85;
+// 单列大字特写的字框宽度天然接近整幅宽：550×1082 黑底「凡厥」拓片的
+// 列带宽 469px，量测后框宽 473px > 0.85W(467.5)，两个正确框会被异常块
+// 过滤全部删掉、返回「切分失败」。命中 isSingleWideColumn 时改用这个上限，
+// 高度上限仍保持 0.85H（整页被当成一个字的高框照样被挡住）。
+const WIDE_COLUMN_MAX_WIDTH_RATIO = 0.95;
+export const maxBoxWidthRatio = (singleWideColumn) =>
+  singleWideColumn === true ? WIDE_COLUMN_MAX_WIDTH_RATIO : MAX_SIZE_RATIO;
 // 判定为「多个字粘在一起」的倍数（相对中位字高/宽）
 const MERGE_FACTOR = 1.85;
 
@@ -472,6 +479,34 @@ export const isSingleWideColumn = (colBands, rowBands, W, pitch) => {
   const typicalHeight = median(Array.isArray(rowBands) ? rowBands.map((b) => b.end - b.start) : []);
   // 带宽与字高相当 → 这一带只装得下一列字
   return typicalHeight > 0 && bandWidth <= typicalHeight * 1.5;
+};
+
+/**
+ * 是否是「笔画级伪字距」：已有多条独立列带，却估出比最窄列带还小得多的字距。
+ *
+ * isSingleWideColumn 只认「剔除细带、合并窄间隙后恰好剩一条实质列带」，覆盖不到
+ * 多列版式。实测 523×1068 黑底「翁同龢書」拓片，右侧一列 4 个大字、左侧还有两枚
+ * 方形印章，列投影给出 [79,210]（印章列，宽 131）与 [327,463]（正文列，宽 136）。
+ * needsWidePitchSearch 把「两条窄带、列心距 0.479W」误判成双联、放宽搜索上限，
+ * estimatePitch 却锁到 pitch=42（score 0.397）——只有列宽的 1/3，其实是笔画宽。
+ * splitBandsByPitch 于是把两条带各拆 3 列，再按 42px 行高切成 53 个 47×46 小框。
+ *
+ * 判据只看几何：列间距不可能比任何一条真实列带还窄。先剔除宽度 < 5% 图宽的
+ * 极细伪带（拓片纸边、扫描边框），再要求至少剩两条实质列带且
+ * pitch < 0.6 × 最窄实质列带宽，才把字距视为笔画级。
+ * 只有一条宽列带时必须放行：整张界面截图 [0,739] / pitch 59 与 dense-grid 里
+ * 粘连的多列，都真的需要按字距拆列（全局把 pitch 置 0 会破坏这两套 golden 夹具）。
+ *
+ * @param {Array<{start: number, end: number}>} colBands 原始列带（未经字距拆分）
+ * @param {number} W 分析图宽
+ * @param {number} pitch 估计出的字距
+ */
+export const isStrokeLevelPitch = (colBands, W, pitch) => {
+  if (!Array.isArray(colBands) || !(W > 0) || !(pitch > 0)) return false;
+  const substantial = colBands.filter((band) => band.end - band.start >= W * 0.05);
+  if (substantial.length < 2) return false;
+  const narrowest = Math.min(...substantial.map((band) => band.end - band.start));
+  return pitch < narrowest * 0.6;
 };
 
 /**
@@ -1206,7 +1241,10 @@ export const segmentFromMasks = (
   // 单列大字特写里列投影的周期性来自笔画而非列间距：字距视为 0，
   // 既不拆列，也不触发后面的网格退化回退（否则整幅会被切成笔画级小方格）
   const singleWideColumn = isSingleWideColumn(rawColBands, rowBands, W, pitchEstimate.pitch);
-  const pitch = singleWideColumn ? 0 : pitchEstimate.pitch;
+  // 多列版式（正文列 + 印章列）同样可能锁到笔画级短周期：每条列带本身就是单列宽，
+  // pitch 却比最窄列带还小得多，再按它拆列只会把字切成网格
+  const strokeLevelPitch = isStrokeLevelPitch(rawColBands, W, pitchEstimate.pitch);
+  const pitch = (singleWideColumn || strokeLevelPitch) ? 0 : pitchEstimate.pitch;
   const splitColBands = splitBandsByPitch(rawColBands, pitch);
   // 命中单列大字时剔除贴边细带、把窄间隙劈开的两半并回一列，
   // 否则它们会被当成第二列继续切框
@@ -1366,7 +1404,8 @@ export const segmentFromMasks = (
   }
 
   // 过滤异常块（过大 = 整页被当成一个字；过小 = 噪点）
-  const maxW = (W / scale) * MAX_SIZE_RATIO;
+  // 只放宽命中单列大字的宽度上限；高度上限不变，避免放过整页一个字的高框
+  const maxW = (W / scale) * maxBoxWidthRatio(singleWideColumn);
   const maxH = (H / scale) * MAX_SIZE_RATIO;
   let usable = boxes.filter((box) => box.width <= maxW && box.height <= maxH && box.width > 4 && box.height > 4);
 
@@ -1423,7 +1462,9 @@ export const segmentFromMasks = (
     columns: colBands.length,
     rawColumns: rawColBands.length,
     singleWideColumn,
+    strokeLevelPitch,
     edgeBands: rawColBands.filter((band) => isNegligibleEdgeBand(band, W)).length,
+    maxWidthRatio: maxBoxWidthRatio(singleWideColumn),
     columnDetail
   };
   if (pitch > 0) {

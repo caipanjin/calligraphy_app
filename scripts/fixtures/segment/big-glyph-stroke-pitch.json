@@ -1,0 +1,121 @@
+{
+  "name": "big-glyph-stroke-pitch",
+  "source": "~/Downloads/微信图片_2026-11-06_234703_984.jpg",
+  "crop": null,
+  "note": "黑底白字碑帖拓片「翁同龢書」523x1068，右侧单列 4 个大字，左侧两枚方形印章，右下角有公众号水印。v8 修复目标图：这是首个多列版式（不只是单列 2 字），反色正常（暗 91.51% → 墨迹 8.49%，Otsu 107），列投影给出两条真实列带 [79,210]（印章列，宽 131）、[327,463]（正文列，宽 136），行带 [171,344]/[388,527]/[543,980]，格线检测 none。needsWidePitchSearch 把「两条窄带、列心距 0.479W」误判成双联并放宽搜索上限，estimatePitch 锁到 pitch=42 / score=0.397，其实只是笔画宽（列宽的 1/3）；isSingleWideColumn 要求剔除细带后恰好 1 条实质列带，这里有 2 条故不命中，splitBandsByPitch 把两条带各拆 3 列，再按 42px 行高切成 6 列 / 53 个 47x46 小框，横排更退化成 84 个 grid 小格。现由 isStrokeLevelPitch 先剔除 <5%W 的细伪带，要求剩余 >=2 条实质列带且 pitch < 0.6x 最窄实质列带宽时把字距视为 0（列间距不可能比任何真实列带还窄）；只有一条宽列带时必须放行，否则会破坏 dense-grid 与 full-screenshot 的拆列。竖排 2 列 6 框：正文 4 字 + 印章 2 枚。free 与 grid 两个 case 守住有格开关不改变结果。横排返回切分失败，与另四张大字拓片一致。已知缺陷：印章被当成 2 个「字」输出（若要只留 4 个单字需另做印章列识别）；「龢」右侧长捺框外墨迹 7.2%、「同」左侧探出 32px，仍属字框水平扩展受相邻空隙约束的问题。",
+  "width": 523,
+  "height": 1068,
+  "scale": 1.0,
+  "imageWidth": 523,
+  "imageHeight": 1068,
+  "threshold": 107,
+  "inkRatio": 0.0849,
+  "faintRatio": 0.0,
+  "inverted": true,
+  "inkFile": "big-glyph-stroke-pitch.ink.bin",
+  "faintFile": "big-glyph-stroke-pitch.faint.bin",
+  "cases": [
+    {
+      "id": "free",
+      "options": {
+        "layout": "vertical",
+        "hasGrid": false
+      },
+      "expected": {
+        "strategy": "projection",
+        "layout": "vertical",
+        "failed": false,
+        "columns": 2,
+        "boxes": [
+          {
+            "x": 326,
+            "y": 169,
+            "w": 137,
+            "h": 177
+          },
+          {
+            "x": 327,
+            "y": 386,
+            "w": 136,
+            "h": 147
+          },
+          {
+            "x": 325,
+            "y": 575,
+            "w": 140,
+            "h": 165
+          },
+          {
+            "x": 325,
+            "y": 798,
+            "w": 140,
+            "h": 187
+          },
+          {
+            "x": 77,
+            "y": 543,
+            "w": 133,
+            "h": 134
+          },
+          {
+            "x": 79,
+            "y": 737,
+            "w": 133,
+            "h": 131
+          }
+        ]
+      }
+    },
+    {
+      "id": "grid",
+      "options": {
+        "layout": "vertical",
+        "hasGrid": true
+      },
+      "expected": {
+        "strategy": "projection",
+        "layout": "vertical",
+        "failed": false,
+        "columns": 2,
+        "boxes": [
+          {
+            "x": 326,
+            "y": 169,
+            "w": 137,
+            "h": 177
+          },
+          {
+            "x": 327,
+            "y": 386,
+            "w": 136,
+            "h": 147
+          },
+          {
+            "x": 325,
+            "y": 575,
+            "w": 140,
+            "h": 165
+          },
+          {
+            "x": 325,
+            "y": 798,
+            "w": 140,
+            "h": 187
+          },
+          {
+            "x": 77,
+            "y": 543,
+            "w": 133,
+            "h": 134
+          },
+          {
+            "x": 79,
+            "y": 737,
+            "w": 133,
+            "h": 131
+          }
+        ]
+      }
+    }
+  ]
+}

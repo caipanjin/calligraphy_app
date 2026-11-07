@@ -20,8 +20,10 @@ export const SEGMENT_STORE = 'segmentations';
  *   v4 = 单列大字特写不再按笔画级字距拆列（两个大字不再被切成 132 个小框）
  *   v5 = 单列大字判据忽略贴边细带（拓片纸边不再被当成第二列，避免切成 124 个小框）
  *   v6 = 单列大字判据合并窄间隙列带（字内投影低谷不再把一列劈成两列）
+ *   v7 = 单列大字的字框宽度上限放宽到 0.95W（0.85W 会删光正确框，返回切分失败）
+ *   v8 = 多列版式识别笔画级伪字距（正文列 + 印章列不再被拆成 6 列 / 53 个小框）
  */
-export const SEGMENT_ALGORITHM_VERSION = 6;
+export const SEGMENT_ALGORITHM_VERSION = 8;
 
 const MANUAL_SUFFIX = ':manual';
 

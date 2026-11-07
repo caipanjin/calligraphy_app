@@ -104,8 +104,9 @@
 灰度化 → Otsu 二值化 → 墨迹掩码
   → 列投影（竖排）→ findBands 找列
   → 每列内行投影 → 找字带
-  → 按字距 pitch 拆分粘连列（贴边细带剔除、窄间隙合并；单列大字特写跳过）
+  → 按字距 pitch 拆分粘连列（单列大字、笔画级伪字距跳过；贴边细带剔除、窄间隙合并）
   → 每字四边按真实墨迹范围扩展（受相邻字空隙约束）
+  → 异常块过滤（单列大字特写的宽度上限单独放宽到 0.95W）
 ```
 
 关键参数：
@@ -134,6 +135,21 @@
   不用自相关得分阈值 —— 整张界面截图 0.213、大字特写 0.171、带纸边的拓片 0.468、
   带投影低谷的拓片 0.300，得分根本无法区分；而「带宽/字高」分别是 2.93 与 0.91，
   区分明确
+- **多列版式的笔画级伪字距**（`isStrokeLevelPitch`）：`isSingleWideColumn` 只认
+  「恰好一条实质列带」，覆盖不到正文列 + 印章列这类多列版式。实测 523×1068 黑底
+  「翁同龢書」拓片有 `[79,210]`（印章列，宽 131）与 `[327,463]`（正文列，宽 136）两条带，
+  `needsWidePitchSearch` 误判成双联放宽搜索上限，`estimatePitch` 却锁到 pitch=42
+  （score 0.397，只有列宽 1/3 的笔画宽），把两条带各拆 3 列、切成 6 列 / 53 个小框。
+  判据只看几何：列间距不可能比任何一条真实列带还窄 —— 先剔除宽度 < **5% 图宽** 的
+  细伪带，要求剩余 ≥ 2 条实质列带且 `pitch < 0.6 × 最窄实质列带宽` 时把字距视为 0。
+  **只有一条宽列带时必须放行**：`full-screenshot`（`[0,739]` / pitch 59）与
+  `dense-grid`（粘连多列 / pitch 120）都真的需要按字距拆列，全局置 0 会破坏这两套夹具
+- **单列大字的宽度上限单独放宽**（`maxBoxWidthRatio`）：异常块过滤默认丢弃宽/高
+  > **85% 图幅**的框（通常是「整页被当成一个字」）。但单列大字特写的列带本身就是
+  字宽：550×1082 黑底「凡厥」拓片列带宽 469px、量测后框宽 473px，而 `0.85W` 只有
+  467.5px，两个正确框被全部删掉、返回「切分失败 / 0 框」（前三张大字拓片列带宽占比
+  都 < 0.79，本图 0.8527 只越线 5.5px）。命中 `isSingleWideColumn` 时只把**宽度**
+  上限放宽到 **95%**，高度仍保持 0.85H，整页单字的高框依旧被挡住
 - 扩展上限同时受「列宽 60%」与「相邻墨迹空隙 45%」约束
   —— 字距密集的字帖上，只按列宽比例扩展会吞并邻字
 - 上下扩展分别用 `gapUp` / `gapDown`，避免末字被上方空隙限制
@@ -195,7 +211,7 @@ App 会提示重新导入，旧字帖与旧练习记录不迁移。全新安装�
 ```bash
 npm install --legacy-peer-deps      # react-image-magnifiers 的 peer 依赖需放宽
 npm run dev                          # 开发服务器（端口 5199）
-npm test                             # 222 项单元测试
+npm test                             # 232 项单元测试
 npm run build                        # 生产构建
 ```
 
@@ -213,16 +229,16 @@ npm run android:open  # 打开 Android Studio
 ### 测试
 
 ```bash
-node scripts/test-segment.mjs            # 切分算法纯函数 68 项
+node scripts/test-segment.mjs            # 切分算法纯函数 75 项
 node scripts/test-boxedit.mjs            # 框编辑 34 项
 node scripts/test-inkprofile.mjs         # 本列候选切线 11 项
 node scripts/test-cache.mjs              # 缓存清理 5 项
 node scripts/test-segment-version.mjs    # 缓存算法版本 18 项
 node scripts/test-practice.mjs           # 练习记录 7 项
-node scripts/test-wechat.mjs             # 公众号提取 24 项
+node scripts/test-wechat.mjs             # 公众号提取 23 项（另 1 项真实文章回归需 /tmp/wx.html）
 node scripts/test-clipboard.mjs          # 剪贴板 12 项
 node scripts/test-album-store.mjs        # 多页字帖数据层 / 进度汇总 / 释放断言 27 项
-node scripts/test-segment-fixtures.mjs   # 真实图 golden 快照 16 项
+node scripts/test-segment-fixtures.mjs   # 真实图 golden 快照 20 项
 ```
 
 `test-album-store.mjs` 直接 import `albumStore.js`，用内存 IndexedDB mock 跑建帖、加页、
@@ -233,17 +249,20 @@ node scripts/test-segment-fixtures.mjs   # 真实图 golden 快照 16 项
 
 `src/utils/segment.js` 导出的 `segmentFromMasks(ink, faint, options)` 是纯计算入口，
 `segmentCharacters` 只负责图像解码与参数透传，两者共用同一条切分链路。
-`scripts/fixtures/segment/` 存放 10 套真实字帖的位压缩墨迹/格线掩码与逐框快照
-（共 14 个 case，含无格自由切分与格线模式），测试直接调用 `segmentFromMasks` 比对。
+`scripts/fixtures/segment/` 存放 12 套真实字帖的位压缩墨迹/格线掩码与逐框快照
+（共 18 个 case，含无格自由切分与格线模式），测试直接调用 `segmentFromMasks` 比对。
 
 覆盖场景包括：「石」字部件合并、两个独立「一」、方格字帖、真实拍照、密集格线、
 整张界面截图、红底双联（`couplet-vertical`，两列中心距 0.483W，曾因字距
 搜索上限 0.4W 被误拆成 6 列）、4 列无格行书（`cursive-vertical`，各列字数
 5/4/4/4、字位与字高都不对齐，用来守住「不做跨列对齐 / 等距推断」的边界），
-以及三张黑底单列大字（`big-glyph-vertical`，「我則」曾被笔画级字距拆成
+以及五张黑底碑帖大字拓片（`big-glyph-vertical`，「我則」曾被笔画级字距拆成
 10 列 / 132 框；`big-glyph-edge-band`，右侧 8px 拓片纸边被当成第二列、
 拆成 11 列 / 124 框；`big-glyph-narrow-gap`，「作我」被 8px 投影低谷劈成
-2 列 / 7 框；三者都用 `free` 与 `grid` 两个 case 守住有格开关不改变结果）。
+2 列 / 7 框；`big-glyph-width-cap`，「凡厥」的两个正确框因宽度 473px 超过
+0.85W(467.5) 被异常块过滤删光、返回 0 框；`big-glyph-stroke-pitch` 是首个多列版式，
+「翁同龢書」4 字加左侧两枚印章曾被 pitch=42 拆成 6 列 / 53 框，现为 2 列 6 框；
+五者都用 `free` 与 `grid` 两个 case 守住有格开关不改变结果）。
 放宽判据另用 25 张 `docs/screens/` 截图做过新旧全链路逐框对比，确认除该对联外零变化。
 `couplet-vertical / free` 与 `yi-grid / grid` 记录的是已知缺陷现状（左联下半按列宽
 均分导致错位、水平格线漏检一半），将来修好时会触发差异，需有意更新快照。
@@ -252,7 +271,7 @@ node scripts/test-segment-fixtures.mjs   # 真实图 golden 快照 16 项
 若确有意为之，用 `node scripts/test-segment-fixtures.mjs --update` 更新快照。
 掩码由 `scripts/gen-segment-fixtures.py` 生成（需要 Pillow + numpy，仅用于再生成，
 不参与 `npm test`；部分受管 Python 只装了 Pillow，跑之前先确认 `import numpy` 可用）；
-原始字帖图不进仓库，七套取自本机 Downloads，其余取自 `docs/screens/`。
+原始字帖图不进仓库，九套取自本机 Downloads，其余取自 `docs/screens/`。
 
 ---
 
@@ -286,7 +305,7 @@ src/
 
 openspec/changes/          各轮改动的设计记录与踩坑总结
 scripts/                   单元测试、夹具生成与 golden 快照
-  fixtures/segment/        7 套真实字帖的位压缩掩码与逐框快照
+  fixtures/segment/        12 套真实字帖的位压缩掩码与逐框快照
 docs/screens/              界面截图
 ```
 
@@ -318,12 +337,19 @@ docs/screens/              界面截图
 - **「用其他应用打开」列表可能不含本应用**：微信的筛选规则不透明，建议用「复制链接 → 粘贴导入」
 - **iOS 剪贴板授权弹窗**：每次读取剪贴板 iOS 都会弹「允许粘贴」，可在
   设置 → 应用 → 从其他 App 粘贴 → 改为「允许」后不再提示
-- **单列大字特写在横排模式下会返回「切分失败」**：两个字本就是上下排列，横排
-  投影切不出框（修复前会退化成 164 / 179 个笔画级小格，第三张则是 10 个 grid 小格）。
+- **大字拓片在横排模式下会返回「切分失败」**：字本就是上下排列，横排投影切不出框
+  （修复前前两张会退化成 164 / 179 个笔画级小格，第三张是 10 个 grid 小格，
+  第四张是 `failed / empty`，第五张是 84 个 grid 小格）。五张图现在都返回 0 框，
   请用默认竖排，或在编辑态手动加框
 - **黑底大字拓片的框会裁掉探出笔画**：`big-glyph-vertical` 框外墨迹约 1.6~1.7%；
   `big-glyph-edge-band` 最明显，框 `x=[67,497]` 左右各裁 67 / 44px（框外墨迹约 5.4%，
   含拓片纸边），长捺与左侧的点被切断；`big-glyph-narrow-gap` 较轻，框外墨迹
-  2.2% / 0.7%（「作」的长撇起笔略被切）。原因是字贴着列带边界时
-  `measureGlyphHorizontally` 的水平扩展被「相邻墨迹空隙」约束锁到 2px。
-  修它会同时改变三张图的 golden 快照，属于独立的字框扩展改造，目前需在编辑态手动拉框
+  2.2% / 0.7%（「作」的长撇起笔略被切）；`big-glyph-width-cap` 框外墨迹
+  2.4% / 4.5%（真实墨迹 x=[0,549] 含拓片纸边，「厥」左侧长撇下端与右下捺尖略被切）；
+  `big-glyph-stroke-pitch` 的「龢」右侧长捺框外墨迹 7.2%、「同」左侧探出 32px。
+  原因是字贴着列带边界时 `measureGlyphHorizontally` 的水平扩展被「相邻墨迹空隙」
+  约束锁到 2px。修它会同时改变五张图的 golden 快照，属于独立的字框扩展改造，
+  目前需在编辑态手动拉框
+- **印章会被当成单字输出**：`big-glyph-stroke-pitch` 左侧两枚方形印章各占一个框，
+  连同正文 4 字共切出 6 框。印章在墨迹投影上与字块难以区分，自动剔除需要额外的
+  印章识别（可能误删真实的小字边款），目前可在编辑态手动删框
