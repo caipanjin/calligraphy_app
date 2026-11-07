@@ -16,6 +16,7 @@ import {
   maxBoxWidthRatio,
   buildGridBoxes,
   splitTallGlyphs,
+  blankGuidedCuts,
   mergeSplitGlyphs,
   detectGridLines,
   boxesFromGridLines,
@@ -478,6 +479,102 @@ check('竖排：高宽比 2.1 的粘连块拆分', () => {
 check('竖排：正常高度的块不拆分', () => {
   const out = splitTallGlyphs([{ start: 48, end: 228 }, { start: 255, end: 385 }], 162);
   assert.equal(out.length, 2);
+});
+
+// —— 高字带空白引导切分（v9）——
+// 合成掩码：列宽 40（x0=0, x1=40）。普通行 4/40=0.1（不算空白，但足够空），
+// 「笔画」行 20/40=0.5，空白行 0/40。这样能分别触发三种切点判定。
+const makeSplitGuide = ({ height = 210, inkRows = [], blankRows = [] } = {}) => {
+  const width = 40;
+  const ink = new Uint8Array(width * height);
+  for (let y = 0; y < height; y += 1) {
+    const inRow = ([start, end]) => y >= start && y < end;
+    const count = blankRows.some(inRow) ? 0 : inkRows.some(inRow) ? 20 : 4;
+    for (let x = 0; x < count; x += 1) ink[y * width + x] = 1;
+  }
+  return { ink, width, x0: 0, x1: width };
+};
+
+check('空白引导：切点本来就在空白处时保持原等分', () => {
+  const guide = makeSplitGuide({ blankRows: [[100, 112]] });
+  const out = splitTallGlyphs([{ start: 0, end: 210 }], 100, 1.7, guide);
+  assert.equal(out.length, 2);
+  assert.equal(out[0].end, 105, '切点不应被挪动');
+  assert.equal(out[1].start, 105);
+});
+
+check('空白引导：切点穿过笔画时吸附到附近的空白段', () => {
+  // 100-112 有墨（切点 105 穿过笔画），118-126 是真正的字间空白
+  const guide = makeSplitGuide({ inkRows: [[100, 112]], blankRows: [[118, 126]] });
+  const out = splitTallGlyphs([{ start: 0, end: 210 }], 100, 1.7, guide);
+  assert.equal(out.length, 2);
+  assert.equal(out[0].end, 122, '应吸附到空白段中点');
+  assert.equal(out[1].start, 122);
+});
+
+check('空白引导：附近有多个空白段时取最长的一段', () => {
+  const guide = makeSplitGuide({
+    inkRows: [[100, 112]],
+    blankRows: [[118, 122], [125, 135]]
+  });
+  const out = splitTallGlyphs([{ start: 0, end: 210 }], 100, 1.7, guide);
+  assert.equal(out[0].end, 130, '10 行空白应优先于 4 行空白');
+});
+
+check('空白引导：切点穿过笔画且附近无空白时撤销这一刀（合成一个字）', () => {
+  // 两段空白的中点 49.5 / 164.5 都在吸附半径 31.5 之外
+  const guide = makeSplitGuide({
+    inkRows: [[100, 112]],
+    blankRows: [[10, 90], [130, 200]]
+  });
+  const out = splitTallGlyphs([{ start: 0, end: 210 }], 100, 1.7, guide);
+  assert.equal(out.length, 1, '穿笔画且找不到空白就不能切');
+  assert.equal(out[0].start, 0);
+  assert.equal(out[0].end, 210);
+});
+
+check('空白引导：三等分带只撤销有问题的那一刀', () => {
+  // 切点 100 足够空 → 保留；切点 200 穿过笔画且附近无空白 → 撤销
+  const guide = makeSplitGuide({
+    height: 300,
+    inkRows: [[195, 205]],
+    blankRows: [[130, 145], [250, 270]]
+  });
+  const out = splitTallGlyphs([{ start: 0, end: 300 }], 100, 1.7, guide);
+  assert.equal(out.length, 2, '三框应变成「独立字 + 一个高字」');
+  assert.equal(out[0].end, 100);
+  assert.equal(out[1].start, 100);
+  assert.equal(out[1].end, 300);
+});
+
+check('空白引导：整带墨迹过密时不启用（实心块仍按原逻辑等分）', () => {
+  const ink = new Uint8Array(40 * 210).fill(1);
+  const out = splitTallGlyphs([{ start: 0, end: 210 }], 100, 1.7, { ink, width: 40, x0: 0, x1: 40 });
+  assert.equal(out.length, 2);
+  assert.equal(out[0].end, 105);
+});
+
+check('空白引导：等分份数超过 3 时不启用（对联长带仍四等分）', () => {
+  const guide = makeSplitGuide({ height: 420 });
+  const out = splitTallGlyphs([{ start: 0, end: 420 }], 100, 1.7, guide);
+  assert.equal(out.length, 4);
+  assert.equal(blankGuidedCuts({ start: 0, end: 420 }, 100, [105, 210, 315], 105, 4, guide), null);
+});
+
+check('空白引导：带高超过 3.2 倍列宽时不启用', () => {
+  const guide = makeSplitGuide({ height: 330 });
+  const out = splitTallGlyphs([{ start: 0, end: 330 }], 100, 1.7, guide);
+  assert.equal(out.length, 3);
+  assert.equal(blankGuidedCuts({ start: 0, end: 330 }, 100, [110, 220], 110, 3, guide), null);
+});
+
+check('空白引导：不传 guide 时行为与旧版完全一致', () => {
+  const guide = makeSplitGuide({ inkRows: [[100, 112]] });
+  const withGuide = splitTallGlyphs([{ start: 0, end: 210 }], 100, 1.7, guide);
+  const withoutGuide = splitTallGlyphs([{ start: 0, end: 210 }], 100);
+  assert.equal(withGuide.length, 1);
+  assert.equal(withoutGuide.length, 2, '没有掩码时仍按列宽机械等分');
+  assert.equal(withoutGuide[0].end, 105);
 });
 
 check('竖排：部件合并——小碎片紧邻大块时合并', () => {

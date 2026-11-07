@@ -103,7 +103,7 @@
 ```
 灰度化 → Otsu 二值化 → 墨迹掩码
   → 列投影（竖排）→ findBands 找列
-  → 每列内行投影 → 找字带
+  → 每列内行投影 → 找字带 → 过高字带按空白引导切分（切点避开笔画）
   → 按字距 pitch 拆分粘连列（单列大字、笔画级伪字距跳过；贴边细带剔除、窄间隙合并）
   → 每字四边按真实墨迹范围扩展（受相邻字空隙约束）
   → 异常块过滤（单列大字特写的宽度上限单独放宽到 0.95W）
@@ -150,6 +150,17 @@
   467.5px，两个正确框被全部删掉、返回「切分失败 / 0 框」（前三张大字拓片列带宽占比
   都 < 0.79，本图 0.8527 只越线 5.5px）。命中 `isSingleWideColumn` 时只把**宽度**
   上限放宽到 **95%**，高度仍保持 0.85H，整页单字的高框依旧被挡住
+- **高字带按空白引导切分**（`blankGuidedCuts`）：行草里单字常明显高于列宽，旧的
+  `splitTallGlyphs` 按列宽机械二等分/三等分，切分线直接穿过笔画。实测 415×1600 的
+  4 列行草条幅有 6 条带被这样拆过，5 组单字各被切成两框（框垂直重叠 5~6px、
+  交界处墨迹连续），真正的字间空白却在几十像素之外。现在等分只决定「切几刀」，
+  每个切点单独校验：**本来就足够空**（7 行平均墨迹 ≤15%）就保留；**穿过笔画**
+  就吸附到附近最长的连续空白段（行投影 ≤ 列宽 5%、至少 2 行、中点距带两端
+  ≥0.45×列宽、搜索半径 0.3×等分步长）；**找不到空白**就撤销这一刀，整条带留作一个字。
+  三等分带里只撤销/吸附其中一刀，正好得到「独立字 + 一个高字」。
+  护栏必须同时满足：**等分份数 ≤3、带高 ≤3.2×列宽、带内墨迹 ≤35%**，
+  其余情况一律走原来的等分 —— 不加护栏会把红底对联的 5 个字并成 746px 巨框，
+  整张界面截图的退化检测也会少切框。该图 60 → 56 框，本来正确的相邻两框不动
 - 扩展上限同时受「列宽 60%」与「相邻墨迹空隙 45%」约束
   —— 字距密集的字帖上，只按列宽比例扩展会吞并邻字
 - 上下扩展分别用 `gapUp` / `gapDown`，避免末字被上方空隙限制
@@ -211,7 +222,7 @@ App 会提示重新导入，旧字帖与旧练习记录不迁移。全新安装�
 ```bash
 npm install --legacy-peer-deps      # react-image-magnifiers 的 peer 依赖需放宽
 npm run dev                          # 开发服务器（端口 5199）
-npm test                             # 232 项单元测试
+npm test                             # 243 项单元测试
 npm run build                        # 生产构建
 ```
 
@@ -229,7 +240,7 @@ npm run android:open  # 打开 Android Studio
 ### 测试
 
 ```bash
-node scripts/test-segment.mjs            # 切分算法纯函数 75 项
+node scripts/test-segment.mjs            # 切分算法纯函数 84 项
 node scripts/test-boxedit.mjs            # 框编辑 34 项
 node scripts/test-inkprofile.mjs         # 本列候选切线 11 项
 node scripts/test-cache.mjs              # 缓存清理 5 项
@@ -238,7 +249,7 @@ node scripts/test-practice.mjs           # 练习记录 7 项
 node scripts/test-wechat.mjs             # 公众号提取 23 项（另 1 项真实文章回归需 /tmp/wx.html）
 node scripts/test-clipboard.mjs          # 剪贴板 12 项
 node scripts/test-album-store.mjs        # 多页字帖数据层 / 进度汇总 / 释放断言 27 项
-node scripts/test-segment-fixtures.mjs   # 真实图 golden 快照 20 项
+node scripts/test-segment-fixtures.mjs   # 真实图 golden 快照 22 项
 ```
 
 `test-album-store.mjs` 直接 import `albumStore.js`，用内存 IndexedDB mock 跑建帖、加页、
@@ -249,8 +260,8 @@ node scripts/test-segment-fixtures.mjs   # 真实图 golden 快照 20 项
 
 `src/utils/segment.js` 导出的 `segmentFromMasks(ink, faint, options)` 是纯计算入口，
 `segmentCharacters` 只负责图像解码与参数透传，两者共用同一条切分链路。
-`scripts/fixtures/segment/` 存放 12 套真实字帖的位压缩墨迹/格线掩码与逐框快照
-（共 18 个 case，含无格自由切分与格线模式），测试直接调用 `segmentFromMasks` 比对。
+`scripts/fixtures/segment/` 存放 13 套真实字帖的位压缩墨迹/格线掩码与逐框快照
+（共 20 个 case，含无格自由切分与格线模式），测试直接调用 `segmentFromMasks` 比对。
 
 覆盖场景包括：「石」字部件合并、两个独立「一」、方格字帖、真实拍照、密集格线、
 整张界面截图、红底双联（`couplet-vertical`，两列中心距 0.483W，曾因字距
@@ -262,16 +273,22 @@ node scripts/test-segment-fixtures.mjs   # 真实图 golden 快照 20 项
 2 列 / 7 框；`big-glyph-width-cap`，「凡厥」的两个正确框因宽度 473px 超过
 0.85W(467.5) 被异常块过滤删光、返回 0 框；`big-glyph-stroke-pitch` 是首个多列版式，
 「翁同龢書」4 字加左侧两枚印章曾被 pitch=42 拆成 6 列 / 53 框，现为 2 列 6 框；
-五者都用 `free` 与 `grid` 两个 case 守住有格开关不改变结果）。
+五者都用 `free` 与 `grid` 两个 case 守住有格开关不改变结果），
+以及浅褐色 4 列行草条幅 `cursive-tall-glyph`（v9 修复目标图：5 组单字曾被机械等分
+水平切开，60 → 56 框；`free` 与 `grid` 两个 case 守住有格开关不改变结果，
+格线检测为 none）。
 放宽判据另用 25 张 `docs/screens/` 截图做过新旧全链路逐框对比，确认除该对联外零变化。
 `couplet-vertical / free` 与 `yi-grid / grid` 记录的是已知缺陷现状（左联下半按列宽
 均分导致错位、水平格线漏检一半），将来修好时会触发差异，需有意更新快照。
+v9 落地时另更新了两套：`cursive-vertical / free` 有一个框边界吸附到真实空白
+（该夹具备注本就写明算法改动需 `--update`），`full-screenshot / free` 的退化检测
+由 171 框变 165 框；其余 11 套逐框零变化。
 
 改动任何切分参数后测试会精确报出「哪张图、第几框、期望值与实际值」；
 若确有意为之，用 `node scripts/test-segment-fixtures.mjs --update` 更新快照。
 掩码由 `scripts/gen-segment-fixtures.py` 生成（需要 Pillow + numpy，仅用于再生成，
 不参与 `npm test`；部分受管 Python 只装了 Pillow，跑之前先确认 `import numpy` 可用）；
-原始字帖图不进仓库，九套取自本机 Downloads，其余取自 `docs/screens/`。
+原始字帖图不进仓库，十套取自本机 Downloads，其余取自 `docs/screens/`。
 
 ---
 
@@ -305,7 +322,7 @@ src/
 
 openspec/changes/          各轮改动的设计记录与踩坑总结
 scripts/                   单元测试、夹具生成与 golden 快照
-  fixtures/segment/        12 套真实字帖的位压缩掩码与逐框快照
+  fixtures/segment/        13 套真实字帖的位压缩掩码与逐框快照
 docs/screens/              界面截图
 ```
 
@@ -326,7 +343,9 @@ docs/screens/              界面截图
 
 - **微信抓取有频率限制**：短时间多次请求会被限流，需等待 1~2 分钟
 - **密集粘连字帖切分不准**：字与字连笔时投影法无法可靠分开（如行草），需在编辑态用
-  「本列切线 / 候选线」逐字修正；无格字帖的字位错落不做自动推断
+  「本列切线 / 候选线」逐字修正；无格字帖的字位错落不做自动推断。
+  高字带被机械等分切开的问题已由 v9 的空白引导切分修正，但 `cursive-tall-glyph`
+  仍留有污渍框、扁框与印章框，需要编辑态手动删改
 - **iOS 超大图仍可能触发内存终止**：已把常驻基线从「最多 20 张完整 base64」改成
   「只读字帖元数据 + 最多 1 份当前页原图」，并做到临时 `Image` / canvas 用完即释放、
   候选线复用切分掩码、缩略图落盘且按需读取、关闭字帖清空全部内存引用。

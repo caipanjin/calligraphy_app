@@ -90,8 +90,8 @@ const needsRecompute = async (db, cacheKey) => {
   return !canReuseSegmentation(auto, cacheKey);
 };
 
-await check('当前算法版本固定为 8（升级算法时须同步改测试与说明）', () => {
-  assert.equal(SEGMENT_ALGORITHM_VERSION, 8);
+await check('当前算法版本固定为 9（升级算法时须同步改测试与说明）', () => {
+  assert.equal(SEGMENT_ALGORITHM_VERSION, 9);
 });
 
 await check('旧记录（无 algorithmVersion 字段）视为过期', () => {

@@ -33,6 +33,20 @@ export const maxBoxWidthRatio = (singleWideColumn) =>
 // 判定为「多个字粘在一起」的倍数（相对中位字高/宽）
 const MERGE_FACTOR = 1.85;
 
+// —— 高字带「空白引导切分」的护栏 ——
+// 行草里单个字常明显高于列宽，旧逻辑按列宽机械等分会把一个字水平切开。
+// 等分只决定「大概切几刀」，切点必须落在真实空白上；但这条规则只适用于
+// 短而稀疏的带，格线字帖的长带、实心块、界面截图仍必须走原来的等分。
+const SPLIT_GUIDE_MAX_PARTS = 3;         // 只处理二 / 三等分
+const SPLIT_GUIDE_MAX_BAND_RATIO = 3.2;  // 带高不超过 3.2×列宽
+const SPLIT_GUIDE_MAX_DENSITY = 0.35;    // 整带墨迹占比上限（超过则投影低谷不可信）
+const SPLIT_GUIDE_BLANK_RATIO = 0.05;    // 行投影 ≤ 列宽 5% 视为空白行
+const SPLIT_GUIDE_MIN_BLANK_RUN = 2;     // 连续空白至少 2 行才算字间空白
+const SPLIT_GUIDE_EDGE_RATIO = 0.45;     // 空白段中点距带两端至少 0.45×列宽
+const SPLIT_GUIDE_SNAP_RATIO = 0.3;      // 吸附搜索半径 = 0.3×等分步长
+const SPLIT_GUIDE_CUT_DENSITY = 0.15;    // 切点 7 行平均墨迹 ≤ 15% 视为本来就空
+const SPLIT_GUIDE_DENSITY_WINDOW = 3;    // 密度窗口 ±3 行
+
 // 注意：若本文件的改动会改变「同一张图切出哪些框」，
 // 必须把 src/utils/segmentCache.js 的 SEGMENT_ALGORITHM_VERSION +1，
 // 否则用户装了新版仍会命中旧算法缓存，看不到新结果。
@@ -1006,15 +1020,116 @@ export const mergeSplitGlyphs = (bands, threshold = 0.25, referenceSize = 0) => 
 };
 
 /**
+ * 让等分切点落在真实空白上（空白引导切分）
+ *
+ * 行草里一个字经常明显高于列宽，例如 4 列条幅里 y174-273 的「雲」高 99px、
+ * 列宽只有 45px：按列宽二等分会把雨字头和下半切成两框，切分线正好穿过笔画，
+ * 结果两框垂直重叠 5~6px、交界处墨迹连续。真正的字间空白往往在别处
+ * （另两条三等分带的空白在 y642-650 与 y1144-1153，离等分切点几十像素）。
+ *
+ * 因此等分只决定「切几刀」，每个切点单独校验：
+ *   1. 切点本来就足够空 → 保留，不动本来正确的切分；
+ *   2. 切点穿过笔画 → 吸附到附近最长的连续空白段；
+ *   3. 附近没有空白段 → 撤销这一刀，整条带留作一个字。
+ * 三等分带里若只有一刀该撤销，就自然变成两框，正好对应「独立字 + 一个高字」。
+ *
+ * 护栏（SPLIT_GUIDE_*）不可省：不加护栏时，红底对联里 5 个字的长带会被并成
+ * 746px 巨框，整张界面截图的退化检测也会少切框。只对短、稀疏、二/三等分的带启用，
+ * 其余版式一律走原来的机械等分。
+ *
+ * @param {{start: number, end: number}} band 待拆的高字带
+ * @param {number} referenceSize 列宽
+ * @param {number[]} idealCuts 机械等分得到的切点
+ * @param {number} step 等分步长
+ * @param {number} parts 等分份数
+ * @param {{ink: Uint8Array, width: number, x0: number, x1: number}|null} guide 墨迹掩码与列范围
+ * @returns {number[]|null} 调整后的切点；null 表示护栏未命中，调用方应按原逻辑等分
+ */
+export const blankGuidedCuts = (band, referenceSize, idealCuts, step, parts, guide) => {
+  const size = band.end - band.start;
+  if (!guide || parts > SPLIT_GUIDE_MAX_PARTS ||
+      size > referenceSize * SPLIT_GUIDE_MAX_BAND_RATIO) return null;
+
+  const { ink, width, x0, x1 } = guide;
+  const columnWidth = Math.max(1, x1 - x0);
+  const profile = new Uint32Array(size);
+  let total = 0;
+  for (let i = 0; i < size; i += 1) {
+    const row = (band.start + i) * width;
+    let value = 0;
+    for (let x = x0; x < x1; x += 1) value += ink[row + x];
+    profile[i] = value;
+    total += value;
+  }
+  // 墨迹过密时（格线、实心块、界面截图）行投影的低谷不代表字间空白
+  if (total / (size * columnWidth) > SPLIT_GUIDE_MAX_DENSITY) return null;
+
+  const blankLimit = columnWidth * SPLIT_GUIDE_BLANK_RATIO;
+  const edge = referenceSize * SPLIT_GUIDE_EDGE_RATIO;
+  // 连续空白段的中点不能贴着带两端：起笔上下的空白不是字间空白
+  const runs = [];
+  let runStart = -1;
+  for (let i = 0; i <= size; i += 1) {
+    const blank = i < size && profile[i] <= blankLimit;
+    if (blank && runStart < 0) runStart = i;
+    if (!blank && runStart >= 0) {
+      if (i - runStart >= SPLIT_GUIDE_MIN_BLANK_RUN) {
+        const mid = band.start + (runStart + i - 1) / 2;
+        if (mid - band.start >= edge && band.end - mid >= edge) {
+          runs.push({ mid: Math.round(mid), len: i - runStart });
+        }
+      }
+      runStart = -1;
+    }
+  }
+
+  // 切点附近的平均行密度：单看切点那一行会被抗锯齿的 1px 断点骗过
+  const densityAt = (cut) => {
+    let sum = 0;
+    let count = 0;
+    for (let k = -SPLIT_GUIDE_DENSITY_WINDOW; k <= SPLIT_GUIDE_DENSITY_WINDOW; k += 1) {
+      const i = cut - band.start + k;
+      if (i >= 0 && i < size) {
+        sum += profile[i];
+        count += 1;
+      }
+    }
+    return count ? sum / count / columnWidth : 1;
+  };
+
+  const radius = step * SPLIT_GUIDE_SNAP_RATIO;
+  const cuts = [];
+  idealCuts.forEach((cut) => {
+    if (densityAt(cut) <= SPLIT_GUIDE_CUT_DENSITY) {
+      cuts.push(cut);
+      return;
+    }
+    // 同长时取离原切点更近的那个空白段
+    const near = runs
+      .filter((run) => Math.abs(run.mid - cut) <= radius)
+      .sort((a, b) => (b.len - a.len) || (Math.abs(a.mid - cut) - Math.abs(b.mid - cut)))[0];
+    if (near) cuts.push(near.mid);
+    // 附近没有空白段：这一刀撤销（不 push）
+  });
+
+  return [...new Set(cuts)]
+    .filter((cut) => cut > band.start + 2 && cut < band.end - 2)
+    .sort((a, b) => a - b);
+};
+
+/**
  * 拆分过高的字块（竖排专用）
  *
  * 竖排时一个字的高度应接近列宽（实测比值 0.7~1.1）。
  * 若某块明显高于列宽（如 1.44 倍），说明上下两个字粘连，
  * 应按列宽等分拆开。
+ *
+ * 传入 guide（墨迹掩码 + 列范围）时启用空白引导切分，把机械等分的切点
+ * 挪到真实空白上；不传 guide 或护栏未命中时行为与旧版完全一致。
  */
 // 正常汉字的高度可以略大于宽度（实测上限约 1.44），
 // 而两字粘连通常在 2.0 以上，因此阈值取 1.7
-export const splitTallGlyphs = (bands, referenceSize, maxRatio = 1.7) => {
+export const splitTallGlyphs = (bands, referenceSize, maxRatio = 1.7, guide = null) => {
   if (bands.length === 0 || referenceSize <= 0) return bands;
 
   const result = [];
@@ -1027,11 +1142,22 @@ export const splitTallGlyphs = (bands, referenceSize, maxRatio = 1.7) => {
     }
     const parts = Math.max(2, Math.round(size / referenceSize));
     const step = size / parts;
-    for (let i = 0; i < parts; i += 1) {
-      result.push({
-        start: Math.round(band.start + i * step),
-        end: Math.round(band.start + (i + 1) * step)
-      });
+    const ideal = [];
+    for (let i = 1; i < parts; i += 1) ideal.push(Math.round(band.start + i * step));
+    const cuts = guide ? blankGuidedCuts(band, referenceSize, ideal, step, parts, guide) : null;
+
+    if (!cuts) {
+      for (let i = 0; i < parts; i += 1) {
+        result.push({
+          start: Math.round(band.start + i * step),
+          end: Math.round(band.start + (i + 1) * step)
+        });
+      }
+      return;
+    }
+    const points = [band.start, ...cuts, band.end];
+    for (let i = 0; i < points.length - 1; i += 1) {
+      result.push({ start: points[i], end: points[i + 1] });
     }
   });
   return result;
@@ -1298,7 +1424,10 @@ export const segmentFromMasks = (
           0.25,
           columnWidth
         ),
-        columnWidth
+        columnWidth,
+        1.7,
+        // 让高字带的等分切点落在真实空白上，避免把行草单字水平切开
+        { ink, width: W, x0: col.start, x1: col.end }
       );
       columnDetail.push({ width: col.end - col.start, bands: charBands.length, sizes: charBands.map((b) => b.end - b.start) });
       charBands.forEach((band, bandIndex) => {
