@@ -3,12 +3,10 @@ import {
   FaChevronLeft,
   FaChevronUp,
   FaChevronDown,
-  FaChevronRight,
   FaSearchPlus,
   FaSearchMinus,
   FaTh,
   FaImages,
-  FaArrowsAlt,
   FaRegHandPointer
 } from 'react-icons/fa';
 import {
@@ -35,8 +33,6 @@ import { segmentCharacters } from '../utils/segment';
 
 // 缩放因子
 const ZOOM_FACTOR = 1.05;
-// 微调步长（图片坐标系像素）
-const ADJUST_STEP = 2;
 // 单字框默认宽度占图片宽度的比例
 const CHAR_WIDTH_RATIO = 0.25;
 // 单字框最小高度比例
@@ -147,9 +143,12 @@ const PracticeView = ({
   const canvasRef = useRef(null);
   const gestureRef = useRef({ mode: 'none', x: 0, y: 0 });
   const pinchRef = useRef(null);
+  // 分页条：切页后把当前页缩略图滚到可视区中央
+  const pagesStripRef = useRef(null);
+  const activeThumbRef = useRef(null);
+  const stripCenteredRef = useRef(false);
 
   const [dragging, setDragging] = useState(false);
-  const [showDpad, setShowDpad] = useState(false);
   // 分页条管理态：打开后每个缩略图右上角出现删除按钮
   const [managing, setManaging] = useState(false);
   // 已保存的切分网格（打开字帖即加载，直接叠在图上点选）
@@ -174,7 +173,6 @@ const PracticeView = ({
 
   const exitCharMode = useCallback(() => {
     setSelectedCharacter(null);
-    setShowDpad(false);
   }, [setSelectedCharacter]);
 
   /* ---------------- 载入已保存的切分 ---------------- */
@@ -568,13 +566,6 @@ const PracticeView = ({
     [setSelectedCharacter, scheduleSaveAdjustment]
   );
 
-  const adjust = useCallback(
-    (dx, dy) => {
-      applyViewBox((viewBox) => ({ ...viewBox, x: viewBox.x + dx, y: viewBox.y + dy }));
-    },
-    [applyViewBox]
-  );
-
   const zoom = useCallback(
     (zoomIn) => {
       applyViewBox((viewBox) => {
@@ -808,10 +799,6 @@ const PracticeView = ({
     if (!isCharMode) return undefined;
 
     const handlers = {
-      ArrowUp: () => adjust(0, -ADJUST_STEP),
-      ArrowDown: () => adjust(0, ADJUST_STEP),
-      ArrowLeft: () => adjust(-ADJUST_STEP, 0),
-      ArrowRight: () => adjust(ADJUST_STEP, 0),
       '+': () => zoom(true),
       '=': () => zoom(true),
       '-': () => zoom(false),
@@ -829,7 +816,35 @@ const PracticeView = ({
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [isCharMode, adjust, zoom, goNext, goPrev, exitCharMode]);
+  }, [isCharMode, zoom, goNext, goPrev, exitCharMode]);
+
+  /* ---------------- 分页条跟随当前页 ---------------- */
+
+  /**
+   * 只在「当前页 / 页数 / 视图模式」变化时校正滚动位置，用户手动横滑不会被打断。
+   * 用 getBoundingClientRect 计算偏移，避免依赖 offsetParent（分页条不是定位元素）。
+   */
+  useEffect(() => {
+    const strip = pagesStripRef.current;
+    const item = activeThumbRef.current;
+    if (!strip || !item || strip.clientWidth === 0) return;
+
+    const stripRect = strip.getBoundingClientRect();
+    const itemRect = item.getBoundingClientRect();
+    const delta =
+      itemRect.left + itemRect.width / 2 - (stripRect.left + stripRect.width / 2);
+    const maxLeft = Math.max(0, strip.scrollWidth - strip.clientWidth);
+    const left = clamp(strip.scrollLeft + delta, 0, maxLeft);
+
+    const centeredBefore = stripCenteredRef.current;
+    stripCenteredRef.current = true;
+    // 首次进入瞬时定位；之后（加页 / 删页 / 从单字模式返回）才做平滑滚动
+    if (centeredBefore && delta !== 0 && 'scrollBehavior' in strip.style) {
+      strip.scrollTo({ left, behavior: 'smooth' });
+    } else {
+      strip.scrollLeft = left;
+    }
+  }, [activePageId, pageIndex, pages.length, isCharMode]);
 
   /* ---------------- 渲染 ---------------- */
 
@@ -945,9 +960,13 @@ const PracticeView = ({
                   </button>
                 </div>
               </div>
-              <div className="recent-strip">
+              <div className="recent-strip" ref={pagesStripRef}>
                 {pages.map((page, index) => (
-                  <div className="recent-strip__wrap" key={page.id}>
+                  <div
+                    className="recent-strip__wrap"
+                    key={page.id}
+                    ref={page.id === activePageId ? activeThumbRef : null}
+                  >
                     <button
                       className={`recent-strip__item${page.id === activePageId ? ' recent-strip__item--active' : ''}`}
                       onClick={() => onSwitchPage && onSwitchPage(page.id)}
@@ -1063,28 +1082,6 @@ const PracticeView = ({
           </div>
 
           <div className="dock">
-            {showDpad && (
-              <div className="dpad">
-                <div />
-                <button className="dpad__btn" onClick={() => adjust(0, -ADJUST_STEP)} aria-label="上移">
-                  <FaChevronUp size={15} />
-                </button>
-                <div />
-                <button className="dpad__btn" onClick={() => adjust(-ADJUST_STEP, 0)} aria-label="左移">
-                  <FaChevronLeft size={15} />
-                </button>
-                <div className="dpad__center">微调</div>
-                <button className="dpad__btn" onClick={() => adjust(ADJUST_STEP, 0)} aria-label="右移">
-                  <FaChevronRight size={15} />
-                </button>
-                <div />
-                <button className="dpad__btn" onClick={() => adjust(0, ADJUST_STEP)} aria-label="下移">
-                  <FaChevronDown size={15} />
-                </button>
-                <div />
-              </div>
-            )}
-
             <div className="dock__row">
               <button className="dock-btn" onClick={goPrev}>
                 <FaChevronUp />
@@ -1093,13 +1090,6 @@ const PracticeView = ({
               <button className="dock-btn" onClick={() => zoom(false)}>
                 <FaSearchMinus />
                 <span>缩小</span>
-              </button>
-              <button
-                className={`dock-btn${showDpad ? ' dock-btn--active' : ''}`}
-                onClick={() => setShowDpad((visible) => !visible)}
-              >
-                <FaArrowsAlt />
-                <span>微调</span>
               </button>
               <button className="dock-btn" onClick={() => zoom(true)}>
                 <FaSearchPlus />

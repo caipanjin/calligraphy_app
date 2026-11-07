@@ -555,7 +555,8 @@ button {
   flex-direction: column;
   justify-content: flex-start;
   min-height: 0;
-  padding: 8px 12px 0;
+  /* 底部分页条要留出点按空间与安全区，否则会被挤到屏幕最下沿 */
+  padding: 8px 12px calc(10px + var(--safe-bottom));
 }
 
 .practice__body .stage-frame {
@@ -726,13 +727,15 @@ button {
   background-size: 50% 50%, 50% 50%, 100% 100%, 100% 100%;
 }
 
-/* 图片模式：最近字帖快捷切换 */
+/* 图片模式：分页缩略图条 */
 .recent-strip {
   display: flex;
-  gap: 8px;
-  padding: 14px 0 0;
+  gap: 10px;
+  padding: 6px 0 4px;
   overflow-x: auto;
   scrollbar-width: none;
+  /* 只做横向滚动，不让整页跟着抖动 */
+  overscroll-behavior-x: contain;
 }
 
 .recent-strip::-webkit-scrollbar {
@@ -741,8 +744,8 @@ button {
 
 .recent-strip__item {
   flex: 0 0 auto;
-  width: 52px;
-  height: 52px;
+  width: 56px;
+  height: 56px;
   border-radius: 10px;
   overflow: hidden;
   background: var(--surface);
@@ -770,7 +773,7 @@ button {
 
 /* 图片模式底部操作区 */
 .stage-actions {
-  padding: 0 0 12px;
+  padding: 0 0 6px;
 }
 
 /* 单字模式的全景缩略导航 */
@@ -894,62 +897,8 @@ button {
   transform: scale(0.94);
 }
 
-.dock-btn--active {
-  color: var(--accent);
-  background: var(--accent-soft);
-}
-
 .dock-btn:disabled {
   opacity: 0.32;
-}
-
-/* 微调方向盘 */
-.dpad {
-  /* 嵌在工具栏内展开（不绝对定位），避免遮挡上方缩略图条 */
-  position: relative;
-  margin: 0 auto 6px;
-  width: max-content;
-  display: grid;
-  grid-template-columns: repeat(3, 40px);
-  grid-template-rows: repeat(3, 40px);
-  gap: 2px;
-  padding: 6px;
-  border-radius: 18px;
-  background: var(--surface-2);
-  box-shadow: var(--shadow-sm);
-  animation: pop-in 0.16s ease;
-}
-
-@keyframes pop-in {
-  from {
-    opacity: 0;
-    transform: translateX(-50%) scale(0.94);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(-50%) scale(1);
-  }
-}
-
-.dpad__btn {
-  display: grid;
-  place-items: center;
-  border-radius: 12px;
-  color: var(--ink-2);
-}
-
-.dpad__btn:hover {
-  background: var(--surface-2);
-}
-
-.dpad__center {
-  display: grid;
-  place-items: center;
-  border-radius: 12px;
-  background: var(--surface-2);
-  font-size: 10px;
-  color: var(--ink-3);
-  letter-spacing: 0.04em;
 }
 
 /* ---------------- 底部抽屉 ---------------- */
@@ -1841,6 +1790,8 @@ button {
 }
 
 .album-pages {
+  /* 固定占高，不参与舞台的 flex 收缩，保证缩略图始终可点 */
+  flex: 0 0 auto;
   margin-top: 6px;
 }
 
@@ -1849,7 +1800,7 @@ button {
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  padding-top: 10px;
+  padding-top: 6px;
 }
 
 .album-pages__label {
@@ -1860,10 +1811,6 @@ button {
 .album-pages__tools {
   display: flex;
   gap: 8px;
-}
-
-.album-pages .recent-strip {
-  padding-top: 8px;
 }
 
 .recent-strip__wrap {

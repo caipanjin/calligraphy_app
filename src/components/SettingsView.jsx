@@ -164,10 +164,6 @@ const SettingsView = ({
         <h2 className="settings-group__title">快捷键（桌面端）</h2>
         <div className="settings-card">
           <div className="settings-row">
-            <span className="settings-row__label" style={{ fontSize: 13 }}>方向键</span>
-            <span className="settings-row__value">微调单字位置</span>
-          </div>
-          <div className="settings-row">
             <span className="settings-row__label" style={{ fontSize: 13 }}>+ / −</span>
             <span className="settings-row__value">放大 / 缩小</span>
           </div>
