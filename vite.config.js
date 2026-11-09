@@ -89,6 +89,12 @@ const wechatProxyPlugin = () => ({
  *   current.<ext>  当前页原图（每次换页覆盖，旧扩展名自动清理）
  *   current.json   本次捕获的元信息（时间、页面、图片字节数、切分结果等）
  *   state.json     最近一次状态快照，含 IndexedDB 的 segmentations / 版面设置
+ *
+ * ⚠️ 采集脚本绝不能抢在 App 之前「创建」数据库：带版本号 open 一个不存在的库，
+ *    会触发 0→5 升级却没有 onupgradeneeded，生成 version=5、零 object store 的空库；
+ *    随后 App 的 open(name, 5) 因版本相同不再升级，永远建不出表，导入必然失败。
+ *    所以只打开「已存在」的库，且不带版本号。
+ *    若本机曾被旧版桥接污染，访问 /__debug/reset 可一次性删除该空库。
  */
 const DEBUG_BRIDGE_DIR = path.join(os.tmpdir(), 'calligraphy-debug');
 const DEBUG_BRIDGE_MAX_BODY = 24 * 1024 * 1024;
@@ -105,17 +111,36 @@ const DEBUG_BRIDGE_CLIENT = String.raw`
   let lastState = '';
   let busy = false;
 
+  // 只打开「已存在」的库，且不带版本号：绝不抢在 App 前创建空库。
+  // 见 vite.config.js 顶部 debugBridgePlugin 注释（version=5 零 object store 的坑）。
+  const openExistingDB = () => new Promise((resolve) => {
+    if (!indexedDB.databases) { resolve(null); return; }
+    let dbsReq;
+    try { dbsReq = indexedDB.databases(); } catch (e) { resolve(null); return; }
+    dbsReq.onerror = () => resolve(null);
+    dbsReq.onsuccess = () => {
+      const found = (dbsReq.result || []).some((item) => item.name === 'calligraphyImages');
+      if (!found) { resolve(null); return; }
+      let req;
+      try { req = indexedDB.open('calligraphyImages'); } catch (e) { resolve(null); return; }
+      req.onerror = () => resolve(null);
+      req.onsuccess = () => resolve(req.result);
+    };
+  });
+
   // 一次打开 DB，同时读切分缓存与「当前页原图」。
   // 原图优先取 DOM 的 .stage-image；单字模式 / 切分面板下没有它时，
   // 用 meta.current 指针回 pages store 取原图，绝不退化成 240px 缩略图。
   const collect = () => new Promise((resolve) => {
-    let req;
-    try { req = indexedDB.open('calligraphyImages', 5); } catch (e) { resolve({ stores: {}, dataUrl: '', pageId: '' }); return; }
-    req.onerror = () => resolve({ stores: {}, dataUrl: '', pageId: '' });
-    req.onsuccess = () => {
-      const db = req.result;
+    // storeNames: null = 库尚不存在（App 会自己建，正常）；[] = 库存在却零表（坏库）
+    const empty = () => ({ stores: {}, storeNames: null, dataUrl: '', pageId: '' });
+    openExistingDB().then((db) => {
+      if (!db) { resolve(empty()); return; }
       const names = ['segmentations', 'segmentationSettings', 'meta', 'albums'];
-      const out = { stores: {}, dataUrl: '', pageId: '' };
+      const out = empty();
+      // 库健康度：版本已是 5 却零 object store，就是旧版桥接污染过的坏库
+      out.storeNames = [];
+      try { out.storeNames = Array.from(db.objectStoreNames); } catch (e) {}
       let left = names.length + 1;
       const done = () => {
         left -= 1;
@@ -143,7 +168,7 @@ const DEBUG_BRIDGE_CLIENT = String.raw`
           };
         };
       } catch (e) { done(); }
-    };
+    });
   });
 
   const post = (body) => fetch(ENDPOINT, {
@@ -170,10 +195,11 @@ const DEBUG_BRIDGE_CLIENT = String.raw`
         pageId: collected.pageId,
         source: fromStage ? 'stage-image' : (collected.dataUrl ? 'indexeddb:pages' : 'none'),
         stores: collected.stores,
+        storeNames: collected.storeNames,
         currentSrcLength: src.length,
         currentSrcPrefix: src.slice(0, 48)
       };
-      const hash = JSON.stringify(meta.stores);
+      const hash = JSON.stringify(meta.stores) + JSON.stringify(meta.storeNames);
       if (src && src !== lastSrc) {
         lastSrc = src;
         lastState = hash;
@@ -203,6 +229,29 @@ const debugBridgePlugin = () => ({
   configureServer(server) {
     fs.mkdirSync(DEBUG_BRIDGE_DIR, { recursive: true });
     console.log(`[debug-bridge] 采集目录: ${DEBUG_BRIDGE_DIR}`);
+
+    // 一次性修复：删掉旧版桥接误建的「version=5 但零 object store」空库。
+    // 这个页面不加载 App，不会与它抢 IndexedDB 连接；只在同一标签页访问才有效。
+    server.middlewares.use('/__debug/reset', (req, res) => {
+      res.setHeader('Content-Type', 'text/html; charset=utf-8');
+      res.end(`<!doctype html><meta charset="utf-8"><title>重置本地字帖库</title>
+<body style="font:14px/1.6 system-ui;padding:24px">
+<p id="msg">正在删除本机 localhost:5173 的字帖数据库，然后返回首页…</p>
+<script>
+  const done = () => { location.replace('/'); };
+  try {
+    const r = indexedDB.deleteDatabase('calligraphyImages');
+    r.onsuccess = done;
+    r.onerror = done;
+    r.onblocked = () => {
+      document.getElementById('msg').textContent = '数据库被其它标签页占用，请关闭其它字帖页后刷新本页。';
+    };
+    setTimeout(done, 3000);
+  } catch (e) { done(); }
+</script>
+</body>`);
+    });
+
     server.middlewares.use('/__debug/report', (req, res) => {
       if (req.method !== 'POST') {
         res.statusCode = 405;

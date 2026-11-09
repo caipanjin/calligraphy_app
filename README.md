@@ -274,7 +274,7 @@ node scripts/diagnose-segment.mjs "$IMG" --out /tmp/diag.png
 |---|---|
 | `current.<ext>` | 当前页原图，扩展名由 MIME 决定；换页覆盖，旧扩展名自动清理 |
 | `current.json` | 最近一次「带原图」的捕获：`updatedAt` / `source` / `pageId` / `file` / `mime` / `bytes` / `stores` |
-| `state.json` | 每次上报都刷新的状态快照；`stores` 含 `segmentations`、`segmentationSettings`、`meta`、`albums` |
+| `state.json` | 每次上报都刷新的状态快照；`stores` 含 `segmentations`、`segmentationSettings`、`meta`、`albums`，另有 `storeNames` 表示库健康度：`null` = 库尚不存在（App 会自建，正常）、`[]` = 库存在却零表（坏库）、正常应含 `albums` / `pages` / `thumbs` / … |
 
 采集策略：原图优先取 DOM 的 `img.stage-image`；单字模式 / 切分面板下没有它时，
 走 `meta.current → pages` 读原图（`source: indexeddb:pages`），**绝不退化到 240px 缩略图**。
@@ -301,6 +301,13 @@ POST 到 dev server 的 `/__debug/report`（请求体上限 24MB）。
 再跑诊断脚本定位到具体判据。
 
 **边界与坑**
+- 采集脚本**绝不能抢先创建 IndexedDB**：旧版直接 `indexedDB.open('calligraphyImages', 5)`，
+  在全新浏览器上下文（预览面板换了存储上下文 / 站点数据被清）会触发 0→5 升级却没有
+  `onupgradeneeded`，生成 version=5、零 object store 的空库；App 随后的 `open(name, 5)`
+  因版本相同不再升级，`upgradeStores()` 永远不跑，表现为「字帖库全空 + 导入失败，请重试」。
+  现改为先用 `indexedDB.databases()` 确认库已存在，再**不带版本号**打开；库不存在就完全不碰。
+  若本机曾被旧版污染，在**同一标签页**打开 `http://localhost:5173/__debug/reset`
+  会自动删掉空库并返回首页重建（该页不加载 App、不注入采集脚本；生产包不含此路由）
 - 插件是 `apply: 'serve'`，生产构建与 iOS / Android 包完全不含这段代码；
   `CALLIGRAPHY_DEBUG_BRIDGE=0 npm run dev` 可关闭。数据只在 localhost 流动、
   只写本机临时目录，不联网；`current.<ext>` 换页即覆盖，要留档先自行复制。
