@@ -235,6 +235,9 @@ npm test                             # 250 项单元测试
 npm run build                        # 生产构建
 ```
 
+GitHub Actions（`.github/workflows/ci.yml`）在 push 到 main 与 PR 时自动跑
+`npm ci` + `npm test` + `npm run build`（Node 22）。
+
 ### 原生打包
 
 ```bash
@@ -245,6 +248,22 @@ npm run android:open  # 打开 Android Studio
 ```
 
 > **改动后务必跑 `ios:copy`**，否则 Xcode 打包的是旧的 `public/` 目录，会看到旧界面甚至白屏。
+
+### 未签名 IPA（侧载到 iPhone）
+
+Xcode 图形界面打不开（提示需要升级）、无法走自动签名时，用一键脚本编**未签名 IPA**，
+再交给 AltStore / Sideloadly 用 Apple ID 签名安装（绕过 Xcode 界面，负责 7 天免费签名）：
+
+```bash
+bash scripts/build-unsigned-ipa.sh                 # Release，输出 build/书法临摹助手-unsigned.ipa
+bash scripts/build-unsigned-ipa.sh Debug           # 指定配置
+bash scripts/build-unsigned-ipa.sh Release my.ipa  # 指定输出文件名
+```
+
+脚本依次跑 `npm run build` → 拷 dist 到 `ios/App/App/public` → xcodebuild 关闭代码签名纯编译
+→ 打成 IPA。输出默认在 `build/`（已 gitignore）。**代码更新后重跑脚本出新 IPA，再在 AltStore
+「Install IPA」覆盖安装**；bundle id 不变则原地更新、练习存档保留。注意 AltStore 的 Refresh
+只续 7 天签名、不更新代码，更新代码必须装新 IPA。
 
 ### 测试
 

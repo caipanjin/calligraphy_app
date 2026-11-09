@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # README 要求放宽 peer 依赖（react-image-magnifiers 的历史遗留）
+      - name: Install dependencies
+        run: npm ci --legacy-peer-deps
+
+      - name: Unit tests + golden fixtures
+        run: npm test
+
+      - name: Production build
+        run: npm run build
