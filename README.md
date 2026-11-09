@@ -42,6 +42,7 @@
 | 合并 | 一个字被切成两框 |
 | 拆分 | 一个框装了多个字 |
 | **加框** | 补切分漏掉的字 —— 支持**单击生成默认大小的框**（尺寸参考同列字）或**拖拽画框** |
+| **区域切分** | 拖出一个矩形（如整列题款小字），自动按**该区域自己**的行投影找字间空白、一次切出多个字框；候选线以编号列出、可点选增减，确认后应用。适合补自动切分刻意丢弃的小字题款，不必逐字加框 |
 | **拖动 / 拉边角** | 直接移动框、单独调整四条边，每个字的高度独立 |
 | **本列切线** | 选中一列任意框后开启；拖动公共边界切线，上下两框同步、不重叠不留缝 |
 | **找候选线** | 只按**本列**行投影低谷给出「可能」的字间切线，点编号选取后重切本列 |
@@ -54,6 +55,12 @@
 > 候选线只作建议。实测一张 4 列行书字帖同位字字心极差最大 157px（17.8% 图高）、
 > 字间空白 -4~43px（含框重叠与连写穿插）。
 > 编辑结果写入 `:manual` 缓存并永久豁免算法版本，不触碰自动切分算法与 golden 快照。
+>
+> **区域切分**同样只作用于编辑态：它复用 `getCandidateBoundaries`（任意矩形的行投影低谷）
+> 与 `resegmentColumnRange`（把区域大框按切线拆成 N+1 框），不改 `segment.js`、不升级
+> `SEGMENT_ALGORITHM_VERSION`、不影响 15 套 golden 夹具。默认只勾选间距 ≥ `0.55×区域宽`
+> 的候选线 —— 字内笔画缝比真字间窄得多，实测题款列 6 条候选线里有一条只隔 47px，
+> 全选会把字切碎。生成的新框会统一按阅读顺序插入，原有框坐标不变。
 
 ### 单字临摹
 
@@ -259,7 +266,7 @@ App 会提示重新导入，旧字帖与旧练习记录不迁移。全新安装�
 ```bash
 npm install --legacy-peer-deps      # react-image-magnifiers 的 peer 依赖需放宽
 npm run dev                          # 开发服务器（Vite 默认端口 5173，可加 -- --port 指定）
-npm test                             # 260 项单元测试
+npm test                             # 264 项单元测试
 npm run build                        # 生产构建
 ```
 
@@ -358,7 +365,7 @@ bash scripts/build-unsigned-ipa.sh Release my.ipa  # 指定输出文件名
 
 ```bash
 node scripts/test-segment.mjs            # 切分算法纯函数 95 项
-node scripts/test-boxedit.mjs            # 框编辑 34 项
+node scripts/test-boxedit.mjs            # 框编辑 38 项（含区域切分护栏与一次切多框）
 node scripts/test-inkprofile.mjs         # 本列候选切线 11 项
 node scripts/test-cache.mjs              # 缓存清理 + 读缓存阅读顺序兜底 8 项
 node scripts/test-segment-version.mjs    # 缓存算法版本 18 项
@@ -427,7 +434,7 @@ src/
   components/
     Library.jsx            字帖库（多页卡片、进度条、重命名/删除）
     PracticeView.jsx       临摹页（图片模式 + 单字模式 + 本字帖分页条）
-    SegmentSheet.jsx       切分面板（拖动、切线、加框、撤销）
+    SegmentSheet.jsx       切分面板（拖动、切线、加框、区域切分、撤销）
     ImportSheet.jsx        公众号导入（粘贴链接、图片选择）
     ClipboardBanner.jsx    剪贴板导入提示条
     SettingsView.jsx       设置页（主题、统计、开关）
@@ -435,8 +442,8 @@ src/
     albumStore.js          多页字帖数据层（albums/pages/thumbs/meta + v5 升级）
     albumProgress.js       字帖库进度汇总（两张小表各读一次）
     segment.js             切分算法核心
-    boxEdit.js             框编辑（增删合并拆分、平移缩放、本列切线）
-    inkProfile.js          本列行投影低谷 → 候选切线（只做建议）
+    boxEdit.js             框编辑（增删合并拆分、平移缩放、本列切线、区域切线护栏）
+    inkProfile.js          区域行投影低谷 → 候选切线（只做建议）
     segmentCache.js        切分缓存读写
     practiceStore.js       练习记录
     wechatArticle.js       公众号图片提取 + 视觉去重
@@ -498,4 +505,4 @@ docs/screens/              界面截图
 - **装裱字帖零化边框后仍有轻微残余**：`mounted-couplet` 经 v11 边框零化从 16 错框改善到
   23 框，但零化保留全图坐标，空边距会略微改变列投影的分位阈值，使左联「觀其」两字合并为
   一框（物理裁切可分开，但需给核心函数加坐标偏移、风险更高，故取低风险的零化方案）；
-  小字题款与印章仍未识别。合并框可在编辑态拆分
+  小字题款与印章仍不自动识别（题款可用编辑态「区域切分」一次补出多个框）。合并框可在编辑态拆分

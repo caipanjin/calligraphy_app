@@ -216,6 +216,36 @@ export const resegmentColumnRange = (boxes, indices, boundaries, vertical = true
   return sortBoxesByReadingOrder([...rest, ...replacement], vertical);
 };
 
+/**
+ * 区域二次切分：从手绘区域的候选切线里挑出「够宽的字间距」作为默认切线。
+ *
+ * 拖选题款小字时，字内笔画间隙也会被行投影当成空白（实测一条题款列里
+ * 相邻候选线只隔 44~47px，而小字本身高约 60~100px）；若把全部候选线
+ * 都应用，会把一个字切成两三块。因此以区域宽度（≈单字宽）为尺度设下限，
+ * 贪心保留间距足够的线。这里只决定「默认勾选哪些」，用户仍可自行增减。
+ *
+ * @param {number[]} boundaries 候选切线（原图 y 坐标）
+ * @param {{y:number,width:number,height:number}} region 手绘区域
+ * @param {number} ratio 最小字间距 / 区域宽度，默认 0.55
+ * @returns {number[]} 默认选中的切线（升序、去重）
+ */
+export const pickRegionCuts = (boundaries, region, ratio = 0.55) => {
+  if (!Array.isArray(boundaries) || !region || !(region.width > 0) || !(region.height > 0)) return [];
+  const minGap = Math.max(MIN_BOX_SIZE, Math.round(region.width * ratio));
+  const top = region.y;
+  const bottom = region.y + region.height;
+  const sorted = [...new Set(
+    boundaries
+      .map((value) => Math.round(value))
+      .filter((value) => Number.isFinite(value) && value > top + minGap && value < bottom - minGap)
+  )].sort((a, b) => a - b);
+  const cuts = [];
+  sorted.forEach((value) => {
+    if (cuts.length === 0 || value - cuts[cuts.length - 1] >= minGap) cuts.push(value);
+  });
+  return cuts;
+};
+
 /** 把某个值吸附到最近的候选位置（未命中容差时原样返回） */
 export const snapValue = (value, candidates, tolerance = 8) => {
   if (!Number.isFinite(value) || !Array.isArray(candidates)) return value;

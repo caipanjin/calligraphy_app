@@ -14,6 +14,7 @@ import {
   columnBoundaries,
   resegmentColumnRange,
   snapValue,
+  pickRegionCuts,
   MIN_BOX_SIZE
 } from '../src/utils/boxEdit.js';
 
@@ -298,6 +299,60 @@ check('吸附：容差外、空候选、非法值都原样返回', () => {
   assert.equal(snapValue(150, [100, 200], 8), 150);
   assert.equal(snapValue(150, [], 8), 150);
   assert.equal(snapValue(NaN, [100], 8), NaN);
+});
+
+/* ---------------- 区域二次切分（编辑态拖区域 → 一次切多框） ---------------- */
+
+check('区域切分护栏：过滤字内笔画缝产生的过近候选线', () => {
+  // IMG_4596 右题款实测：574→621 只隔 47px，小于 0.55×110=61px，
+  // 属于字内笔画间隙，默认不勾选；用户仍可在界面上手动补选。
+  const region = { x: 930, y: 450, width: 110, height: 670 };
+  assert.deepEqual(
+    pickRegionCuts([574, 621, 665, 767, 872, 1007], region),
+    [574, 665, 767, 872, 1007]
+  );
+});
+
+check('区域切分护栏：区域外与贴边的切线剔除，结果去重升序', () => {
+  const region = { x: 0, y: 100, width: 100, height: 500 };
+  // 有效区间 (155, 545)；154 / 590 / 601 越界，300 与 260 相距不足 55px
+  assert.deepEqual(pickRegionCuts([80, 154, 590, 601, 300, 300, 260, 400], region), [260, 400]);
+});
+
+check('区域切分护栏：空候选 / 非法区域返回空，ratio 可调', () => {
+  const region = { x: 0, y: 0, width: 100, height: 500 };
+  assert.deepEqual(pickRegionCuts([], region), []);
+  assert.deepEqual(pickRegionCuts(null, region), []);
+  assert.deepEqual(pickRegionCuts([200], null), []);
+  assert.deepEqual(pickRegionCuts([200], { x: 0, y: 0, width: 0, height: 100 }), []);
+  assert.deepEqual(pickRegionCuts([200], { x: 0, y: 0, width: -1, height: 100 }), []);
+  // 放宽到 0.2（minGap=22px）后，相距 47px 的两条线都保留
+  assert.deepEqual(pickRegionCuts([574, 621], { x: 930, y: 450, width: 110, height: 670 }, 0.2), [574, 621]);
+  assert.ok(Math.round(MIN_BOX_SIZE) > 0, '护栏下限至少不小于最小框尺寸');
+});
+
+check('区域切分：大框 + 切线一次切成多框，原框不变且按阅读顺序插入', () => {
+  const existing = [
+    { x: 700, y: 100, width: 200, height: 200 },
+    { x: 700, y: 350, width: 200, height: 200 },
+    { x: 200, y: 100, width: 200, height: 200 },
+    { x: 200, y: 350, width: 200, height: 200 }
+  ];
+  const region = { x: 930, y: 100, width: 90, height: 450 };
+  // 组件里的用法：把区域大框临时追加到末尾，只重切它一个
+  const draft = [...existing, region];
+  const next = resegmentColumnRange(draft, [existing.length], [200, 300, 400], true);
+  assert.equal(next.length, existing.length + 4, '3 条切线应切出 4 个框');
+  const added = next.filter((b) => b.x === region.x && b.width === region.width);
+  assert.equal(added.length, 4);
+  assert.deepEqual(added.map((b) => b.y), [100, 200, 300, 400]);
+  assert.deepEqual(added.map((b) => b.height), [100, 100, 100, 150]);
+  existing.forEach((b) => assert.ok(
+    next.some((n) => n.x === b.x && n.y === b.y && n.width === b.width && n.height === b.height),
+    '原有框应原样保留'
+  ));
+  const firstOriginal = next.findIndex((b) => b.x === 700);
+  assert.ok(next.indexOf(added[0]) < firstOriginal, '题款列在最右，应排在正文前面而不是堆在数组末尾');
 });
 
 console.log(`\n${passed} 项通过`);

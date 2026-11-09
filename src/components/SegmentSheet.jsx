@@ -25,7 +25,7 @@ import {
 import {
   removeBox, mergeBoxes, splitBox, findNearestBoxIndex, addBox,
   groupBoxesByColumn, columnBoundaries, setColumnBoundary,
-  resegmentColumnRange, moveBox, resizeBox, snapValue
+  resegmentColumnRange, moveBox, resizeBox, snapValue, pickRegionCuts
 } from '../utils/boxEdit';
 import { getCandidateBoundaries } from '../utils/inkProfile';
 import { deleteImagePractice, readImagePractice } from '../utils/practiceStore';
@@ -72,6 +72,10 @@ const SegmentSheet = ({ image, db, onSelectCharacter, onClose }) => {
   const [draftRect, setDraftRect] = useState(null); // 百分比坐标 {left, top, width, height}
   const draftStartRef = useRef(null);
   const previewRef = useRef(null);
+  // 区域切分模式：拖出一个矩形而非单个字框，松手后按该区域的行投影找字间切线。
+  // 只作用于编辑态手动结果（:manual），不改自动切分、不触发算法版本升级。
+  const [regionMode, setRegionMode] = useState(false);
+  const [regionCut, setRegionCut] = useState(null); // { box, lines }
   const [practicedCount, setPracticedCount] = useState(0);
   // 本列切线：只作用于选中框所在的列，绝不做跨列对齐或等距推断
   const [cutMode, setCutMode] = useState(false);
@@ -89,6 +93,8 @@ const SegmentSheet = ({ image, db, onSelectCharacter, onClose }) => {
     setCutMode(false);
     setCandidateLines([]);
     setSelectedLines([]);
+    setRegionMode(false);
+    setRegionCut(null);
     setHistoryDepth(0);
     historyRef.current = [];
     maskRef.current = null;
@@ -353,6 +359,8 @@ const SegmentSheet = ({ image, db, onSelectCharacter, onClose }) => {
         y1: Math.max(...activeColumn.indices.map((i) => boxes[i].y + boxes[i].height))
       }
     : null;
+  // 「切线」栏在两种模式下共用：普通切线用本列候选，区域切分用区域候选
+  const barLines = regionCut ? regionCut.lines : candidateLines;
 
   // 任意编辑后切到「用户结果」，后续操作都基于它
   // 两个键：自动结果与用户结果分开存，互不覆盖
@@ -365,6 +373,21 @@ const SegmentSheet = ({ image, db, onSelectCharacter, onClose }) => {
   /* ---------------- 画框（补漏切的字） ---------------- */
 
   const startDraw = () => {
+    setRegionMode(false);
+    setRegionCut(null);
+    setDrawing(true);
+    setSelectedIndex(null);
+    setDraftRect(null);
+    draftStartRef.current = null;
+  };
+
+  /** 区域切分：与「加框」共用拖拽手势，但松手后是分析区域而不是新增一个框 */
+  const startRegionDraw = () => {
+    setRegionMode(true);
+    setRegionCut(null);
+    setCutMode(false);
+    setCandidateLines([]);
+    setSelectedLines([]);
     setDrawing(true);
     setSelectedIndex(null);
     setDraftRect(null);
@@ -373,8 +396,35 @@ const SegmentSheet = ({ image, db, onSelectCharacter, onClose }) => {
 
   const cancelDraw = () => {
     setDrawing(false);
+    setRegionMode(false);
     setDraftRect(null);
     draftStartRef.current = null;
+  };
+
+  /**
+   * 分析手绘区域：复用自动切分那份墨迹掩码，只在该矩形的 x 范围内做行投影，
+   * 得到「可能的字间空白」。默认勾选经过 pickRegionCuts 护栏的线，用户可增减。
+   */
+  const analyzeRegion = async (box) => {
+    setProfilePending(true);
+    try {
+      const { boundaries, mask } = await getCandidateBoundaries(image, {
+        x0: box.x,
+        x1: box.x + box.width,
+        y0: box.y,
+        y1: box.y + box.height,
+        mask: maskRef.current,
+        maxCount: 16
+      });
+      maskRef.current = mask;
+      setRegionCut({ box, lines: boundaries });
+      setSelectedLines(pickRegionCuts(boundaries, box));
+    } catch (error) {
+      setRegionCut(null);
+      setSelectedLines([]);
+    } finally {
+      setProfilePending(false);
+    }
   };
 
   // 把鼠标/触摸位置换算成图片百分比坐标
@@ -445,6 +495,12 @@ const SegmentSheet = ({ image, db, onSelectCharacter, onClose }) => {
     // 浏览器不会再合成 click（实测导致单击永远不生效）。
     if (width < 0.02 || height < 0.02) {
       setDraftRect(null);
+      if (regionMode) {
+        // 区域模式下单击没有语义：取消本次拖拽，不要误加一个默认字框
+        setDrawing(false);
+        setRegionMode(false);
+        return;
+      }
       const defaultBox = inferDefaultBox(point);
       if (defaultBox) {
         setDrawing(false);
@@ -463,6 +519,11 @@ const SegmentSheet = ({ image, db, onSelectCharacter, onClose }) => {
 
     setDraftRect(null);
     setDrawing(false);
+    if (regionMode) {
+      setRegionMode(false);
+      analyzeRegion(box);
+      return;
+    }
     clearPracticeForImage();
     applyBoxes(addBox(boxes, box, true));
   };
@@ -658,6 +719,7 @@ const SegmentSheet = ({ image, db, onSelectCharacter, onClose }) => {
   };
 
   const toggleCutMode = () => {
+    setRegionCut(null);
     setCutMode((value) => !value);
     setCandidateLines([]);
     setSelectedLines([]);
@@ -701,6 +763,25 @@ const SegmentSheet = ({ image, db, onSelectCharacter, onClose }) => {
       clearPracticeForImage();
       applyBoxes(next, { historyFrom: source });
       setCandidateLines([]);
+      setSelectedLines([]);
+    });
+  };
+
+  /**
+   * 把区域大框按选中的切线一次拆成多个字框。
+   * 复用 resegmentColumnRange：把大框临时追加到数组末尾，只重切它一个，
+   * 函数内部会保留其它框并统一按阅读顺序重排（新框不会排到末尾导致跳字）。
+   */
+  const handleApplyRegionCuts = () => {
+    if (!regionCut || selectedLines.length === 0) return;
+    const source = boxes;
+    const draft = [...source, regionCut.box];
+    const next = resegmentColumnRange(draft, [source.length], selectedLines, true);
+    if (next === draft) return;
+    confirmIfPracticed(() => {
+      clearPracticeForImage();
+      applyBoxes(next, { historyFrom: source });
+      setRegionCut(null);
       setSelectedLines([]);
     });
   };
@@ -831,15 +912,19 @@ const SegmentSheet = ({ image, db, onSelectCharacter, onClose }) => {
 
           {status === 'done' && editing && (
             <div className="seg-edit-hint">
-              {drawing
-                ? '在图片上单击生成一个默认大小的框，或拖拽画出指定大小'
-                : cutMode
-                  ? selectedIndex === null
-                    ? '切线模式：先点本列任意一个框'
-                    : `本列 ${columnCuts.length + 1} 字 · 拖动横线调相邻两字边界，框可整体拖动或拉角`
-                  : selectedIndex === null
-                    ? '点击任意框选中，再选择下方操作；框可直接拖动'
-                    : `已选中第 ${selectedIndex + 1} 个框，可拖动或拉角调整`}
+              {regionMode
+                ? '区域切分：拖拽框选题款 / 小字区域，松手后自动找字间切线'
+                : drawing
+                  ? '在图片上单击生成一个默认大小的框，或拖拽画出指定大小'
+                  : regionCut
+                    ? `区域切分：找到 ${barLines.length} 条候选线 · 点编号微调，再点「应用」一次生成字框`
+                    : cutMode
+                      ? selectedIndex === null
+                        ? '切线模式：先点本列任意一个框'
+                        : `本列 ${columnCuts.length + 1} 字 · 拖动横线调相邻两字边界，框可整体拖动或拉角`
+                      : selectedIndex === null
+                        ? '点击任意框选中，再选择下方操作；框可直接拖动'
+                        : `已选中第 ${selectedIndex + 1} 个框，可拖动或拉角调整`}
             </div>
           )}
 
@@ -962,13 +1047,21 @@ const SegmentSheet = ({ image, db, onSelectCharacter, onClose }) => {
             </button>
             {drawing ? (
               <button className="btn btn--text" onClick={cancelDraw}>
-                取消加框
+                取消{regionMode ? '区域' : '加框'}
               </button>
             ) : (
-              <button className="btn btn--ghost" onClick={startDraw}>
-                <FaPlus size={13} />
-                加框
-              </button>
+              <>
+                <button className="btn btn--ghost" onClick={startDraw}>
+                  <FaPlus size={13} />
+                  加框
+                </button>
+                <button
+                  className={`btn btn--ghost${regionCut ? ' seg-btn--active' : ''}`}
+                  onClick={startRegionDraw}
+                >
+                  区域切分
+                </button>
+              </>
             )}
             <button
               className={`btn btn--ghost${cutMode ? ' seg-btn--active' : ''}`}
@@ -986,22 +1079,24 @@ const SegmentSheet = ({ image, db, onSelectCharacter, onClose }) => {
                 还原
               </button>
             )}
-            {cutMode && (
+            {(cutMode || regionCut) && (
               <div className="seg-cut-bar">
                 <button
                   className="btn btn--ghost"
-                  onClick={handleFindCandidates}
-                  disabled={!columnRange || profilePending}
+                  onClick={regionCut ? () => analyzeRegion(regionCut.box) : handleFindCandidates}
+                  disabled={(!columnRange && !regionCut) || profilePending}
                 >
                   {profilePending ? '分析中…' : '找候选线'}
                 </button>
                 <div className="seg-cut-chips">
-                  {candidateLines.length === 0 ? (
+                  {barLines.length === 0 ? (
                     <span className="seg-cut-bar__hint">
-                      候选线只来自本列：点编号选取，应用后按所选切线重切本列
+                      {regionCut
+                        ? '该区域没找到字间空白：换个范围重试，或直接用「加框」补字'
+                        : '候选线只来自本列：点编号选取，应用后按所选切线重切本列'}
                     </span>
                   ) : (
-                    candidateLines.map((y, i) => (
+                    barLines.map((y, i) => (
                       <button
                         key={y}
                         className={`seg-cut-chip${selectedLines.includes(y) ? ' seg-cut-chip--on' : ''}`}
@@ -1016,11 +1111,19 @@ const SegmentSheet = ({ image, db, onSelectCharacter, onClose }) => {
                 </div>
                 <button
                   className="btn btn--primary"
-                  onClick={handleApplyCuts}
+                  onClick={regionCut ? handleApplyRegionCuts : handleApplyCuts}
                   disabled={selectedLines.length === 0}
                 >
                   应用{selectedLines.length > 0 ? ` (${selectedLines.length})` : ''}
                 </button>
+                {regionCut && (
+                  <button
+                    className="btn btn--text"
+                    onClick={() => { setRegionCut(null); setSelectedLines([]); }}
+                  >
+                    取消区域
+                  </button>
+                )}
               </div>
             )}
           </div>
