@@ -101,7 +101,7 @@
 ### 切分算法（`src/utils/segment.js`）
 
 ```
-灰度化 → Otsu 二值化 → 墨迹掩码
+灰度化 → 装裱边框检测（命中则零化边框、只在纸区内算阈值）→ Otsu 二值化 → 墨迹掩码
   → 列投影（竖排）→ findBands 找列
   → 每列内行投影 → 找字带 → 过高字带按空白引导切分（切点避开笔画）
   → 按字距 pitch 拆分粘连列（单列大字、笔画级伪字距跳过；贴边细带剔除、窄间隙合并）
@@ -111,6 +111,13 @@
 
 关键参数：
 
+- **装裱边框检测**（`detectContentBorder`，v11）：白纸黑字字帖常被深色装裱边/黑底包围，
+  暗色占比可能 >60%，会骗过反色判据（误当成黑底白字拓片），边框本身也被当成墨迹把图切碎。
+  检测浅色纸区包围盒，命中时把边框零化、只在纸区内重算 Otsu 与反色。四重守卫防误裁：
+  内容区面积 <92% 全图、左右各内缩 ≥4%（排除 UI 状态栏这类单侧暗条）、区内浅色占比 ≥50%
+  （排除拓片上稀疏的白色笔画）、区外暗色占比 ≥60%。实测 1968×3840 装裱对联暗色 66% 误反色、
+  旧切 16 框穿字，修复后纸区内阈值由 123 变 145、切出 23 框（右联 12 字逐字成框）；
+  13 套既有夹具源图全部不命中、掩码逐字节不变
 - 相对阈值：90 分位 × `INK_RATIO=0.15`，配 3 点平滑，抗噪
 - 字距自相关的搜索上限默认 **40% 图宽**；仅当列投影呈「双联形态」（恰好两条窄列带、
   宽度接近、列心距在 0.4W~0.55W 之间）时放宽到 **55%**，否则真实列周期会被排除、
@@ -231,7 +238,7 @@ App 会提示重新导入，旧字帖与旧练习记录不迁移。全新安装�
 ```bash
 npm install --legacy-peer-deps      # react-image-magnifiers 的 peer 依赖需放宽
 npm run dev                          # 开发服务器（端口 5199）
-npm test                             # 250 项单元测试
+npm test                             # 256 项单元测试
 npm run build                        # 生产构建
 ```
 
@@ -268,7 +275,7 @@ bash scripts/build-unsigned-ipa.sh Release my.ipa  # 指定输出文件名
 ### 测试
 
 ```bash
-node scripts/test-segment.mjs            # 切分算法纯函数 91 项
+node scripts/test-segment.mjs            # 切分算法纯函数 95 项
 node scripts/test-boxedit.mjs            # 框编辑 34 项
 node scripts/test-inkprofile.mjs         # 本列候选切线 11 项
 node scripts/test-cache.mjs              # 缓存清理 5 项
@@ -277,7 +284,7 @@ node scripts/test-practice.mjs           # 练习记录 7 项
 node scripts/test-wechat.mjs             # 公众号提取 23 项（另 1 项真实文章回归需 /tmp/wx.html）
 node scripts/test-clipboard.mjs          # 剪贴板 12 项
 node scripts/test-album-store.mjs        # 多页字帖数据层 / 进度汇总 / 释放断言 27 项
-node scripts/test-segment-fixtures.mjs   # 真实图 golden 快照 22 项
+node scripts/test-segment-fixtures.mjs   # 真实图 golden 快照 24 项
 ```
 
 `test-album-store.mjs` 直接 import `albumStore.js`，用内存 IndexedDB mock 跑建帖、加页、
@@ -288,8 +295,8 @@ node scripts/test-segment-fixtures.mjs   # 真实图 golden 快照 22 项
 
 `src/utils/segment.js` 导出的 `segmentFromMasks(ink, faint, options)` 是纯计算入口，
 `segmentCharacters` 只负责图像解码与参数透传，两者共用同一条切分链路。
-`scripts/fixtures/segment/` 存放 13 套真实字帖的位压缩墨迹/格线掩码与逐框快照
-（共 20 个 case，含无格自由切分与格线模式），测试直接调用 `segmentFromMasks` 比对。
+`scripts/fixtures/segment/` 存放 14 套真实字帖的位压缩墨迹/格线掩码与逐框快照
+（共 22 个 case，含无格自由切分与格线模式），测试直接调用 `segmentFromMasks` 比对。
 
 覆盖场景包括：「石」字部件合并、两个独立「一」、方格字帖、真实拍照、密集格线、
 整张界面截图、红底双联（`couplet-vertical`，两列中心距 0.483W，曾因字距
@@ -304,7 +311,10 @@ node scripts/test-segment-fixtures.mjs   # 真实图 golden 快照 22 项
 五者都用 `free` 与 `grid` 两个 case 守住有格开关不改变结果），
 以及浅褐色 4 列行草条幅 `cursive-tall-glyph`（v9 修复目标图：5 组单字曾被机械等分
 水平切开，60 → 56 框；`free` 与 `grid` 两个 case 守住有格开关不改变结果，
-格线检测为 none）。
+格线检测为 none），
+以及白底黑字装裱对联 `mounted-couplet`（v11 修复目标图：深色装裱边 + 黑底使暗色占比
+66% 骗过反色判据，旧切 16 框穿字；`detectContentBorder` 零化边框后切 23 框，
+右联 12 字逐字成框、左联「觀其」合并为一框；`free` 与 `grid` 两个 case 守住有格开关不改变结果）。
 放宽判据另用 25 张 `docs/screens/` 截图做过新旧全链路逐框对比，确认除该对联外零变化。
 `couplet-vertical / free` 与 `yi-grid / grid` 记录的是已知缺陷现状（左联下半按列宽
 均分导致错位、水平格线漏检一半），将来修好时会触发差异，需有意更新快照。
@@ -316,7 +326,7 @@ v9 落地时另更新了两套：`cursive-vertical / free` 有一个框边界吸
 若确有意为之，用 `node scripts/test-segment-fixtures.mjs --update` 更新快照。
 掩码由 `scripts/gen-segment-fixtures.py` 生成（需要 Pillow + numpy，仅用于再生成，
 不参与 `npm test`；部分受管 Python 只装了 Pillow，跑之前先确认 `import numpy` 可用）；
-原始字帖图不进仓库，十套取自本机 Downloads，其余取自 `docs/screens/`。
+原始字帖图不进仓库，十一套取自本机 Downloads，其余取自 `docs/screens/`。
 
 ---
 
@@ -350,7 +360,7 @@ src/
 
 openspec/changes/          各轮改动的设计记录与踩坑总结
 scripts/                   单元测试、夹具生成与 golden 快照
-  fixtures/segment/        13 套真实字帖的位压缩掩码与逐框快照
+  fixtures/segment/        14 套真实字帖的位压缩掩码与逐框快照
 docs/screens/              界面截图
 ```
 
@@ -396,3 +406,7 @@ docs/screens/              界面截图
 - **印章会被当成单字输出**：`big-glyph-stroke-pitch` 左侧两枚方形印章各占一个框，
   连同正文 4 字共切出 6 框。印章在墨迹投影上与字块难以区分，自动剔除需要额外的
   印章识别（可能误删真实的小字边款），目前可在编辑态手动删框
+- **装裱字帖零化边框后仍有轻微残余**：`mounted-couplet` 经 v11 边框零化从 16 错框改善到
+  23 框，但零化保留全图坐标，空边距会略微改变列投影的分位阈值，使左联「觀其」两字合并为
+  一框（物理裁切可分开，但需给核心函数加坐标偏移、风险更高，故取低风险的零化方案）；
+  小字题款与印章仍未识别。合并框可在编辑态拆分

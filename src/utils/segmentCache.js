@@ -24,8 +24,9 @@ export const SEGMENT_STORE = 'segmentations';
  *   v8 = 多列版式识别笔画级伪字距（正文列 + 印章列不再被拆成 6 列 / 53 个小框）
  *   v9 = 高字带按空白引导切分（行草单字不再被机械等分水平切开）
  *   v10 = 字框水平扩展改用列间空隙限额、左右独立（探出笔画不再被裁；单列大字宽度上限放宽到整幅）
+ *   v11 = 检测并零化装裱边框（白纸黑字 + 深色装裱边不再被误反色/边框污染切碎）
  */
-export const SEGMENT_ALGORITHM_VERSION = 10;
+export const SEGMENT_ALGORITHM_VERSION = 11;
 
 const MANUAL_SUFFIX = ':manual';
 

@@ -8,8 +8,8 @@
   - faint：7x7 邻域（步长 3）灰度中位数减当前灰度 > 6，且当前不是墨迹
 位压缩：每像素 1 bit，行优先、MSB first，与 test-segment-fixtures.mjs 的 unpack 对应。
 
-注意：原始字帖图片不进仓库。其中十套来自本机 Downloads（含对联、五张黑底拓片
-与一张浅褐行草条幅），需保证文件仍在；其余三套来自仓库内 docs/screens/ 的
+注意：原始字帖图片不进仓库。其中十一套来自本机 Downloads（含对联、五张黑底拓片、
+一张浅褐行草条幅与一张白底装裱对联），需保证文件仍在；其余三套来自仓库内 docs/screens/ 的
 界面截图（按固定矩形裁剪）。
 faint 的邻域中位数在距边缘 7px 内用 nanmedian 近似 JS 的「丢弃越界样本后
 取上中位数」，格线均在图像内部，不影响检测结果。
@@ -222,6 +222,26 @@ FIXTURES = [
             {"id": "grid", "layout": "vertical", "hasGrid": True},
         ],
     },
+    {
+        "name": "mounted-couplet",
+        "source": "~/Downloads/c668b02cafe40c25ad882d6f5eeacba2.JPG",
+        "crop": None,
+        "note": (
+            "白底黑字装裱对联 1968x3840（分析图 820x1600），楷书偏行：右联「仁者不憂智者不惑勇者不懼」"
+            "12 字、左联「視其所以觀其所由察其所安」12 字，左侧小字题款与印章，纸外有深绿装裱边 + 大面积黑底。"
+            "v11 修复目标图：深色装裱边 + 黑底使全图暗色占比达 66% > 60%，骗过 buildInkMask 反色判据"
+            "（误当成黑底白字拓片），反色后「墨迹」变成白纸而非黑字，旧结果竖排 2 列 16 框、每框约 1.5 字、"
+            "框线穿字，题款印章未框出。现由 detectContentBorder 检测浅色纸区包围盒（四重守卫：内容区 <92% 全图、"
+            "左右各内缩 ≥4%、区内浅色 ≥50%、区外暗色 ≥60%），命中时只在纸区内重算 Otsu（阈值由 123 变 145）、"
+            "边框零化，不再误反色。竖排 4 列 23 框：右联 12 框每框一字，左联 11 框（「觀其」因空边距改变投影分位"
+            "阈值、列带略宽而合并为一框，可在编辑态拆分）；题款小字与印章仍未框出。free 与 grid 两个 case 守住"
+            "有格开关不改变结果。已知瑕疵：左联「觀其」合并、题款印章未识别。"
+        ),
+        "cases": [
+            {"id": "free", "layout": "vertical", "hasGrid": False},
+            {"id": "grid", "layout": "vertical", "hasGrid": True},
+        ],
+    },
 ]
 
 
@@ -255,6 +275,28 @@ def pack_bits(mask):
     return np.bitwise_or.reduce(bits.reshape(-1, 8), axis=1).astype(np.uint8).tobytes()
 
 
+def detect_content_border(gray, W, H, threshold):
+    """镜像 segment.js 的 detectContentBorder：找浅色纸区包围盒，四重守卫防误裁。"""
+    light = gray > threshold
+    ys, xs = np.where(light)
+    if len(xs) == 0:
+        return None
+    x0, x1 = int(xs.min()), int(xs.max() + 1)
+    y0, y1 = int(ys.min()), int(ys.max() + 1)
+    region_area = (x1 - x0) * (y1 - y0)
+    if region_area > W * H * 0.92:
+        return None
+    if not (x0 > W * 0.04 and x1 < W * 0.96):
+        return None
+    if light[y0:y1, x0:x1].mean() < 0.5:
+        return None
+    outside = np.ones((H, W), bool)
+    outside[y0:y1, x0:x1] = False
+    if not outside.any() or (gray[outside] < threshold).mean() < 0.6:
+        return None
+    return (x0, y0, x1, y1)
+
+
 def build_masks(path, crop):
     im = Image.open(path).convert("RGB")
     if crop:
@@ -267,12 +309,26 @@ def build_masks(path, crop):
     rgb = arr.astype(np.float64)
     gray = ((rgb[:, :, 0] * 299 + rgb[:, :, 1] * 587 + rgb[:, :, 2] * 114) / 1000).astype(np.uint8).astype(np.int64)
     hist = np.bincount(gray.ravel(), minlength=256)
-    th = otsu(hist, W * H)
-    ink = (gray < th).astype(np.uint8)
+    full_th = otsu(hist, W * H)
+    # 装裱边框检测：命中时只在浅色纸区内算阈值/墨迹，边框零化（与 JS 一致）
+    border = detect_content_border(gray, W, H, full_th)
+    if border:
+        x0, y0, x1, y1 = border
+        region = gray[y0:y1, x0:x1]
+        th = otsu(np.bincount(region.ravel(), minlength=256), region.size)
+        region_area = region.size
+    else:
+        x0, y0, x1, y1 = 0, 0, W, H
+        th = full_th
+        region_area = W * H
+    ink = np.zeros((H, W), dtype=np.uint8)
+    sub = (gray[y0:y1, x0:x1] < th).astype(np.uint8)
+    ink_count = int(sub.sum())
     inverted = False
-    if ink.mean() > 0.6:
-        ink = 1 - ink
+    if ink_count > region_area * 0.6:
+        sub = 1 - sub
         inverted = True
+    ink[y0:y1, x0:x1] = sub
 
     win = 7
     offs = list(range(-win, win + 1, 3))
@@ -285,6 +341,11 @@ def build_masks(path, crop):
         bg = np.nanmedian(stack, axis=0)
     bg = np.nan_to_num(bg, nan=255.0)
     faint = (((bg - gray) > 6) & (gray > th) & (ink == 0)).astype(np.uint8)
+    # 边框区域的 faint 零化（与 JS 只在内容区循环一致）
+    if border:
+        region_mask = np.zeros((H, W), dtype=np.uint8)
+        region_mask[y0:y1, x0:x1] = 1
+        faint = faint * region_mask
 
     return {
         "width": W,

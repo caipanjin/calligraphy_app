@@ -7,6 +7,7 @@ import fs from 'node:fs';
 import {
   findBands,
   otsuThreshold,
+  detectContentBorder,
   estimatePitch,
   needsWidePitchSearch,
   isSingleWideColumn,
@@ -949,6 +950,56 @@ check('segmentCharacters 用完必须释放位图，并把掩码交给 onMask �
   const onMaskBlock = body.slice(body.indexOf('options.onMask'), body.indexOf('return segmentFromMasks'));
   assert.ok(/ink:\s*mask\.ink/.test(onMaskBlock) && !/faint/.test(onMaskBlock),
     '交给 onMask 的掩码只应含 ink，不能把 faint 一起常驻');
+});
+
+// —— 装裱边框检测（v11）：白纸黑字 + 深色装裱边，避免误反色/边框污染 ——
+const borderThreshold = (gray) => {
+  const hist = new Uint32Array(256);
+  for (let p = 0; p < gray.length; p += 1) hist[gray[p]] += 1;
+  return otsuThreshold(hist, gray.length);
+};
+
+check('装裱边框：深色画框 + 中心浅色纸区命中，返回内容包围盒', () => {
+  const W = 100;
+  const H = 100;
+  const gray = new Uint8Array(W * H).fill(30); // 深色边框
+  for (let y = 10; y < 90; y += 1) {
+    for (let x = 20; x < 80; x += 1) gray[y * W + x] = 200; // 浅色纸区
+  }
+  const box = detectContentBorder(gray, W, H, 120); // 明确取暗(30)/亮(200)中间阈值
+  assert.ok(box, '应命中装裱边框');
+  assert.equal(box.x0, 20);
+  assert.equal(box.x1, 80);
+  assert.equal(box.y0, 10);
+  assert.equal(box.y1, 90);
+});
+
+check('装裱边框：整幅都是浅色纸（无边框）不裁', () => {
+  const gray = new Uint8Array(100 * 100).fill(200);
+  assert.equal(detectContentBorder(gray, 100, 100, borderThreshold(gray)), null);
+});
+
+check('装裱边框：黑底稀疏白笔画（拓片）不裁——内容区浅色占比不足', () => {
+  const W = 100;
+  const H = 100;
+  const gray = new Uint8Array(W * H).fill(30); // 黑底
+  // 中心区域里只有稀疏白色笔画（浅色占比远低于 50%）
+  for (let y = 20; y < 80; y += 6) {
+    for (let x = 20; x < 80; x += 1) {
+      if (x % 10 < 2) gray[y * W + x] = 220;
+    }
+  }
+  assert.equal(detectContentBorder(gray, W, H, borderThreshold(gray)), null);
+});
+
+check('装裱边框：单侧暗条（UI 状态栏，左右不内缩）不裁', () => {
+  const W = 100;
+  const H = 100;
+  const gray = new Uint8Array(W * H).fill(200); // 浅色内容铺满左右
+  for (let y = 0; y < 20; y += 1) {
+    for (let x = 0; x < W; x += 1) gray[y * W + x] = 30; // 仅顶部暗条
+  }
+  assert.equal(detectContentBorder(gray, W, H, borderThreshold(gray)), null);
 });
 
 check('buildInkMask 结束前释放 canvas 的 backing store', () => {

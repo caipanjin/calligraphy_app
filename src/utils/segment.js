@@ -108,6 +108,68 @@ export const otsuThreshold = (histogram, total) => {
 };
 
 /**
+ * 检测「装裱边框」：白纸黑字字帖常被深色装裱边/黑底包围，暗色占比可能 >60%，
+ * 会骗过 buildInkMask 的反色判据（误当成黑底白字拓片），且边框本身被当成墨迹
+ * 把图切碎。这里找出浅色纸区的包围盒，命中时把边框零化、只在纸区内算阈值。
+ *
+ * 四重守卫确保不误裁（实测 13 套夹具源图全部不命中）：
+ *   1. 内容区面积 < 92% 全图（确实存在一圈边框，而非整幅都是纸）；
+ *   2. 左右两侧都内缩 ≥4%（装裱画框的特征；排除 UI 状态栏这类单侧暗条）；
+ *   3. 内容区内浅色占比 ≥50%（是大块浅色纸，而非拓片上稀疏的白色笔画）；
+ *   4. 内容区外暗色占比 ≥60%（外圈确实是深色边框）。
+ *
+ * @param {Uint8Array} gray 灰度图
+ * @param {number} width 图宽
+ * @param {number} height 图高
+ * @param {number} threshold 全图 Otsu 阈值（用于区分浅/暗）
+ * @returns {{x0:number,y0:number,x1:number,y1:number}|null} 内容包围盒，未命中返回 null
+ */
+export const detectContentBorder = (gray, width, height, threshold) => {
+  let x0 = width;
+  let x1 = 0;
+  let y0 = height;
+  let y1 = 0;
+  for (let y = 0; y < height; y += 1) {
+    const row = y * width;
+    for (let x = 0; x < width; x += 1) {
+      if (gray[row + x] > threshold) {
+        if (x < x0) x0 = x;
+        if (x + 1 > x1) x1 = x + 1;
+        if (y < y0) y0 = y;
+        if (y + 1 > y1) y1 = y + 1;
+      }
+    }
+  }
+  if (x1 <= x0 || y1 <= y0) return null;
+  const regionArea = (x1 - x0) * (y1 - y0);
+  if (regionArea > width * height * 0.92) return null;
+  if (!(x0 > width * 0.04 && x1 < width * 0.96)) return null;
+
+  let lightIn = 0;
+  for (let y = y0; y < y1; y += 1) {
+    const row = y * width;
+    for (let x = x0; x < x1; x += 1) {
+      if (gray[row + x] > threshold) lightIn += 1;
+    }
+  }
+  if (lightIn < regionArea * 0.5) return null;
+
+  let darkOut = 0;
+  let outCount = 0;
+  for (let y = 0; y < height; y += 1) {
+    const row = y * width;
+    const inY = y >= y0 && y < y1;
+    for (let x = 0; x < width; x += 1) {
+      if (inY && x >= x0 && x < x1) continue;
+      outCount += 1;
+      if (gray[row + x] < threshold) darkOut += 1;
+    }
+  }
+  if (outCount === 0 || darkOut < outCount * 0.6) return null;
+  return { x0, y0, x1, y1 };
+};
+
+/**
  * 生成墨迹掩码：缩放 → 灰度 → Otsu 二值化 → 反色修正
  * 返回的 scale 是「分析图坐标 / 原图坐标」
  *
@@ -139,19 +201,46 @@ export const buildInkMask = (img, maxSize = MAX_ANALYSIS_SIZE, { withFaint = tru
     histogram[g] += 1;
   }
 
-  const threshold = otsuThreshold(histogram, width * height);
+  const fullThreshold = otsuThreshold(histogram, width * height);
+  // 装裱边框检测：命中时只在浅色纸区内算阈值/墨迹、边框零化，避免深色装裱边
+  // 骗过反色判据或被当成墨迹把图切碎。未命中时区域=全图，输出与原逻辑一致。
+  const border = detectContentBorder(gray, width, height, fullThreshold);
+  const rx0 = border ? border.x0 : 0;
+  const ry0 = border ? border.y0 : 0;
+  const rx1 = border ? border.x1 : width;
+  const ry1 = border ? border.y1 : height;
+  const regionArea = (rx1 - rx0) * (ry1 - ry0);
+
+  // 内容区阈值：命中边框时在纸区内重算 Otsu（排除黑边干扰），否则用全图阈值
+  let threshold = fullThreshold;
+  if (border) {
+    const regionHist = new Uint32Array(256);
+    for (let y = ry0; y < ry1; y += 1) {
+      const row = y * width;
+      for (let x = rx0; x < rx1; x += 1) regionHist[gray[row + x]] += 1;
+    }
+    threshold = otsuThreshold(regionHist, regionArea);
+  }
+
   const ink = new Uint8Array(width * height);
   let inkCount = 0;
-  for (let p = 0; p < gray.length; p += 1) {
-    if (gray[p] < threshold) {
-      ink[p] = 1;
-      inkCount += 1;
+  for (let y = ry0; y < ry1; y += 1) {
+    const row = y * width;
+    for (let x = rx0; x < rx1; x += 1) {
+      const p = row + x;
+      if (gray[p] < threshold) {
+        ink[p] = 1;
+        inkCount += 1;
+      }
     }
   }
 
-  // 白字黑底时反色
-  if (inkCount > width * height * 0.6) {
-    for (let p = 0; p < ink.length; p += 1) ink[p] ^= 1;
+  // 白字黑底时反色（按内容区占比判断，排除边框面积干扰）
+  if (inkCount > regionArea * 0.6) {
+    for (let y = ry0; y < ry1; y += 1) {
+      const row = y * width;
+      for (let x = rx0; x < rx1; x += 1) ink[row + x] ^= 1;
+    }
   }
 
   // 格线掩码：比「局部背景」略暗、但不是墨迹的细结构
@@ -161,8 +250,8 @@ export const buildInkMask = (img, maxSize = MAX_ANALYSIS_SIZE, { withFaint = tru
   if (withFaint) {
     faint = new Uint8Array(width * height);
     const window = 7;
-    for (let y = 0; y < height; y += 1) {
-      for (let x = 0; x < width; x += 1) {
+    for (let y = ry0; y < ry1; y += 1) {
+      for (let x = rx0; x < rx1; x += 1) {
         const p = y * width + x;
         if (ink[p]) continue;
         // 局部背景：窗口内灰度中位数
