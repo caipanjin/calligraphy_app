@@ -181,6 +181,16 @@
   任一不满足就完全回退原等分。刻意不全局下调 `minGap`（会让 `full-screenshot`
   从 165 框塌到 131 框）。该图左联 8 → 7 框、总 15 → 14 框，右联 7 框不动，
   其余 21 个 golden case 逐框零变化
+- **阅读顺序排序改用真实字框宽度**（v13）：`sortByReadingOrder` 用
+  `round(Δx / (step×0.5))` 判「是否换列」，`step` 原先取所有列带宽的中位数。
+  带题款的双联会检出 5 条列带（题款 16 / 左联 143 / 中缝 48 / 右联 144 / 题款 32），
+  中位数被压到 48（原图约 67），同列内字形宽度造成的 x 偏移 ≥17px 就被误判成换列，
+  排序退化成按 x 降序：**框位置全对，但左联「垂丹淵」在数组里倒序成「淵丹垂」，
+  「下一字」从「氣」直接跳到「淵」**。两处调用改用 `median(boxes.width)`（约 220px）
+  后分列门槛回到 ~55px，左右联各 7 框严格自上而下。同时在 `readSegmentation`
+  用 `sortBoxesByReadingOrder` 兜底重排，旧缓存与 `:manual` 手动结果不必重算也能按
+  正确顺序练习（只改数组顺序、不改任何框坐标）。22 个既有 golden case 零变化，
+  新增 `couplet-inscription` 专门守住数组顺序
 - **水平扩展左右独立、按列间空隙限额**（v10）：书法字本身有大小差异，字框宽度
   不必一致、允许相邻框重叠。左右各自的上限取「到相邻列带边界的距离」（列间空隙）
   与「列宽 60%」的较小者，允许伸满列间空隙但不跨进邻列；单列无邻居时按列宽比例。
@@ -249,7 +259,7 @@ App 会提示重新导入，旧字帖与旧练习记录不迁移。全新安装�
 ```bash
 npm install --legacy-peer-deps      # react-image-magnifiers 的 peer 依赖需放宽
 npm run dev                          # 开发服务器（Vite 默认端口 5173，可加 -- --port 指定）
-npm test                             # 256 项单元测试
+npm test                             # 260 项单元测试
 npm run build                        # 生产构建
 ```
 
@@ -350,13 +360,13 @@ bash scripts/build-unsigned-ipa.sh Release my.ipa  # 指定输出文件名
 node scripts/test-segment.mjs            # 切分算法纯函数 95 项
 node scripts/test-boxedit.mjs            # 框编辑 34 项
 node scripts/test-inkprofile.mjs         # 本列候选切线 11 项
-node scripts/test-cache.mjs              # 缓存清理 5 项
+node scripts/test-cache.mjs              # 缓存清理 + 读缓存阅读顺序兜底 8 项
 node scripts/test-segment-version.mjs    # 缓存算法版本 18 项
 node scripts/test-practice.mjs           # 练习记录 7 项
 node scripts/test-wechat.mjs             # 公众号提取 23 项（另 1 项真实文章回归需 /tmp/wx.html）
 node scripts/test-clipboard.mjs          # 剪贴板 12 项
 node scripts/test-album-store.mjs        # 多页字帖数据层 / 进度汇总 / 释放断言 27 项
-node scripts/test-segment-fixtures.mjs   # 真实图 golden 快照 24 项
+node scripts/test-segment-fixtures.mjs   # 真实图 golden 快照 25 项
 ```
 
 `test-album-store.mjs` 直接 import `albumStore.js`，用内存 IndexedDB mock 跑建帖、加页、
@@ -367,12 +377,15 @@ node scripts/test-segment-fixtures.mjs   # 真实图 golden 快照 24 项
 
 `src/utils/segment.js` 导出的 `segmentFromMasks(ink, faint, options)` 是纯计算入口，
 `segmentCharacters` 只负责图像解码与参数透传，两者共用同一条切分链路。
-`scripts/fixtures/segment/` 存放 14 套真实字帖的位压缩墨迹/格线掩码与逐框快照
-（共 22 个 case，含无格自由切分与格线模式），测试直接调用 `segmentFromMasks` 比对。
+`scripts/fixtures/segment/` 存放 15 套真实字帖的位压缩墨迹/格线掩码与逐框快照
+（共 23 个 case，含无格自由切分与格线模式），测试直接调用 `segmentFromMasks` 比对。
+快照记录的是**排序后**的 boxes 数组，因此既守住框坐标，也守住「下一字」的跳转顺序。
 
 覆盖场景包括：「石」字部件合并、两个独立「一」、方格字帖、真实拍照、密集格线、
 整张界面截图、红底双联（`couplet-vertical`，两列中心距 0.483W，曾因字距
-搜索上限 0.4W 被误拆成 6 列）、4 列无格行书（`cursive-vertical`，各列字数
+搜索上限 0.4W 被误拆成 6 列）、带题款橙底双联（`couplet-inscription`，v13 修复目标图：
+5 条列带把分列步长压到 48，左联尾部三字在数组中倒序；14 框、左右各 7 框，
+专门守住阅读顺序）、4 列无格行书（`cursive-vertical`，各列字数
 5/4/4/4、字位与字高都不对齐，用来守住「不做跨列对齐 / 等距推断」的边界），
 以及五张黑底碑帖大字拓片（`big-glyph-vertical`，「我則」曾被笔画级字距拆成
 10 列 / 132 框；`big-glyph-edge-band`，右侧 8px 拓片纸边被当成第二列、
@@ -391,7 +404,8 @@ node scripts/test-segment-fixtures.mjs   # 真实图 golden 快照 24 项
 `yi-grid / grid` 仍记录水平格线漏检一半的已知缺陷现状，将来修好时会触发差异，
 需有意更新快照。`couplet-vertical / free` 的左联等分错位已由 **v12** 修复
 （15 → 14 框，左联 8 → 7 框、切点落在真实字间空白），落地时同步更新了这一套快照，
-其余 21 个 case 逐框零变化。
+其余 21 个 case 逐框零变化。v13 只改排序步长与缓存读取兜底，22 个既有 case 逐框零变化，
+新增的 `couplet-inscription / free` 记录修复后的 14 框正确顺序。
 v9 落地时另更新了两套：`cursive-vertical / free` 有一个框边界吸附到真实空白
 （该夹具备注本就写明算法改动需 `--update`），`full-screenshot / free` 的退化检测
 由 171 框变 165 框；其余 11 套逐框零变化。

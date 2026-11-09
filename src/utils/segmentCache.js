@@ -1,3 +1,5 @@
+import { sortBoxesByReadingOrder } from './boxEdit.js';
+
 /**
  * 切分结果的本地缓存（IndexedDB）
  *
@@ -26,8 +28,9 @@ export const SEGMENT_STORE = 'segmentations';
  *   v10 = 字框水平扩展改用列间空隙限额、左右独立（探出笔画不再被裁；单列大字宽度上限放宽到整幅）
  *   v11 = 检测并零化装裱边框（白纸黑字 + 深色装裱边不再被误反色/边框污染切碎）
  *   v12 = 超长字带按本列真实字距重切（红底双联左联下半不再被五等分穿字）
+ *   v13 = 阅读顺序排序的分列步长改用框宽中位数（带题款双联不再把同列字误判成换列而倒序）
  */
-export const SEGMENT_ALGORITHM_VERSION = 12;
+export const SEGMENT_ALGORITHM_VERSION = 13;
 
 const MANUAL_SUFFIX = ':manual';
 
@@ -57,6 +60,14 @@ const withStore = (db, mode, fn) => {
   }
 };
 
+/**
+ * 读缓存时统一按阅读顺序重排，作为最后一道兜底。
+ *
+ * 早期算法的排序在带题款的双联上会退化成按 x 降序，把左联尾部几个字的
+ * 数组顺序弄反（框位置没错，但「下一字」会跳错）。这里顺手修正，
+ * 让旧缓存和 :manual 手动结果不必重算也能按正确顺序练习。
+ * 排序只改变数组顺序，不改任何框坐标。
+ */
 export const readSegmentation = (db, key) =>
   new Promise((resolve) => {
     const request = withStore(db, 'readonly', (store) => store.get(key));
@@ -64,7 +75,17 @@ export const readSegmentation = (db, key) =>
       resolve(null);
       return;
     }
-    request.onsuccess = () => resolve(request.result || null);
+    request.onsuccess = () => {
+      const record = request.result || null;
+      if (!record || !Array.isArray(record.boxes) || record.boxes.length === 0) {
+        resolve(record);
+        return;
+      }
+      resolve({
+        ...record,
+        boxes: sortBoxesByReadingOrder(record.boxes, (record.layout || 'vertical') !== 'horizontal')
+      });
+    };
     request.onerror = () => resolve(null);
   });
 

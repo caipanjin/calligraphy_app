@@ -1652,7 +1652,9 @@ export const segmentFromMasks = (
       });
     });
     // 竖排的高度拆分已由 splitTallGlyphs 按列宽完成，这里不再重复按中位值拆分
-    sortByReadingOrder(boxes, 'vertical', median(colBands.map((band) => band.end - band.start)) / scale);
+    // 分列步长必须取真实字框宽度：colBands 含题款窄列 / 中缝时中位数会被压到
+    // 远小于字列宽，同列内因字形宽度产生的 x 偏移会被误判成换列（见 v13）。
+    sortByReadingOrder(boxes, 'vertical', median(boxes.map((box) => box.width)));
   }
 
   // 有格字帖：格线本身就是最可靠的分隔，直接用它生成单元格
@@ -1771,8 +1773,10 @@ export const segmentFromMasks = (
   if (usable.length > 0) {
     const ranges = colBands.map((band) => ({ start: band.start / scale, end: band.end / scale }));
     usable = normalizeColumnCounts(usable, ranges, layout);
-    // 归一过程会按分组重建数组，这里恢复阅读顺序
-    const columnWidth = median(colBands.map((band) => band.end - band.start)) / scale;
+    // 归一过程会按分组重建数组，这里恢复阅读顺序。
+    // 步长用框宽中位数而非列带中位数：带题款的双联会把列带中位数压到 1/3，
+    // 使排序退化成按 x 降序，左联尾部几个字倒序（v13）。
+    const columnWidth = median(usable.map((box) => box.width));
     sortByReadingOrder(usable, layout, columnWidth);
   }
 

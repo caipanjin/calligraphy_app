@@ -84,6 +84,23 @@ FIXTURES = [
         "cases": [{"id": "free", "layout": "vertical", "hasGrid": False}],
     },
     {
+        "name": "couplet-inscription",
+        "source": "~/Downloads/IMG_4596.JPG",
+        "crop": None,
+        "note": (
+            "橙底楷书对联 1080x2238，左「百寶一氣垂丹淵」右「層檐直上見華蓋」，"
+            "每联 7 字，另有左右题款小字与中缝；列投影检出 5 条列带"
+            "（题款 16 / 左联 143 / 中缝 48 / 右联 144 / 题款 32）。"
+            "旧版 sortByReadingOrder 的分列步长取列带中位数 48（原图约 67），"
+            "同列内 x 偏移 ≥17px 即被误判成换列，排序退化成按 x 降序："
+            "左联尾部「垂丹淵」在数组中倒序成「淵丹垂」，框位置全对，"
+            "但「下一字」会从「氣」跳到「淵」。v13 改用框宽中位数（约 220px）作步长，"
+            "快照 14 框、左右各 7 框且严格按阅读顺序。"
+            "本夹具专门守住框数组顺序：坐标或顺序任一变化都会触发差异。"
+        ),
+        "cases": [{"id": "free", "layout": "vertical", "hasGrid": False}],
+    },
+    {
         "name": "cursive-vertical",
         "source": "~/Downloads/IMG_4575.JPG",
         "crop": None,
