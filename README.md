@@ -170,6 +170,17 @@
   护栏必须同时满足：**等分份数 ≤3、带高 ≤3.2×列宽、带内墨迹 ≤35%**，
   其余情况一律走原来的等分 —— 不加护栏会把红底对联的 5 个字并成 746px 巨框，
   整张界面截图的退化检测也会少切框。该图 60 → 56 框，本来正确的相邻两框不动
+- **超长字带按本列真实字距重切**（`rebandLongGlyphBand`，v12）：字距极密时（红底对联
+  左联下半，真实字间空白只有 3 / 10 / 6 行，小于 `gapRow = 0.008H = 13px`），
+  `findBands` 会把 5 个字并成 818px 的单一超长带；`blankGuidedCuts` 的三道护栏
+  （五等分 >3 份、带高 3.86×列宽 >3.2、墨迹密度 0.518 >35%）全部不命中，
+  只能按列宽机械五等分，切点落在 y≈1229/1426/1624、实际空白却在
+  y≈1101/1364/1573，刀刀穿字。`parts ≥ 4` 且带高 ≥4×列宽时，先取本列行投影
+  以 `minGap = 0.02×列宽`、`minSize = 0.35×列宽` 重跑 `findBands`；两道护栏兜底：
+  **子带数 ∈ [max(3, parts−1), parts+1]、每条带高 ∈ [0.8, 1.6]×列宽**，
+  任一不满足就完全回退原等分。刻意不全局下调 `minGap`（会让 `full-screenshot`
+  从 165 框塌到 131 框）。该图左联 8 → 7 框、总 15 → 14 框，右联 7 框不动，
+  其余 21 个 golden case 逐框零变化
 - **水平扩展左右独立、按列间空隙限额**（v10）：书法字本身有大小差异，字框宽度
   不必一致、允许相邻框重叠。左右各自的上限取「到相邻列带边界的距离」（列间空隙）
   与「列宽 60%」的较小者，允许伸满列间空隙但不跨进邻列；单列无邻居时按列宽比例。
@@ -237,13 +248,67 @@ App 会提示重新导入，旧字帖与旧练习记录不迁移。全新安装�
 
 ```bash
 npm install --legacy-peer-deps      # react-image-magnifiers 的 peer 依赖需放宽
-npm run dev                          # 开发服务器（端口 5199）
+npm run dev                          # 开发服务器（Vite 默认端口 5173，可加 -- --port 指定）
 npm test                             # 256 项单元测试
 npm run build                        # 生产构建
 ```
 
 GitHub Actions（`.github/workflows/ci.yml`）在 push 到 main 与 PR 时自动跑
 `npm ci` + `npm test` + `npm run build`（Node 22）。
+
+### 调试桥接（dev-only）：命令行直接读取当前打开的字帖
+
+手工测试发现切分异常时**不必截图、不必导出发图**：只要 dev server 在跑并停在目标字帖页，
+页面会自动把「当前原图 + 切分结果」写到本机临时目录，命令行 / AI 侧直接读文件即可复现与定位。
+
+```bash
+npm run dev                          # 默认 5173，启动时也会打印采集目录
+DEBUG_DIR=$(python3 -c 'import tempfile,os; print(os.path.join(tempfile.gettempdir(),"calligraphy-debug"))')
+ls -l "$DEBUG_DIR"                  # current.<ext> / current.json / state.json
+# 扩展名随图片变化，从 current.json 的 file 字段取准确文件名
+IMG=$(DEBUG_DIR="$DEBUG_DIR" python3 -c 'import json,os; d=os.environ["DEBUG_DIR"]; print(os.path.join(d, json.load(open(os.path.join(d,"current.json")))["file"]))')
+node scripts/diagnose-segment.mjs "$IMG" --out /tmp/diag.png
+```
+
+| 落盘文件 | 内容 |
+|---|---|
+| `current.<ext>` | 当前页原图，扩展名由 MIME 决定；换页覆盖，旧扩展名自动清理 |
+| `current.json` | 最近一次「带原图」的捕获：`updatedAt` / `source` / `pageId` / `file` / `mime` / `bytes` / `stores` |
+| `state.json` | 每次上报都刷新的状态快照；`stores` 含 `segmentations`、`segmentationSettings`、`meta`、`albums` |
+
+采集策略：原图优先取 DOM 的 `img.stage-image`；单字模式 / 切分面板下没有它时，
+走 `meta.current → pages` 读原图（`source: indexeddb:pages`），**绝不退化到 240px 缩略图**。
+停在字帖库没打开字帖时抓到的是「上次练到的那一页」，看 `source` / `pageId` 即可分辨
+（`stage-image` / `indexeddb:pages` / `none`）。MutationObserver + 3s 轮询驱动，
+换页发全量包（含 dataUrl），仅切分框或版面设置变化发轻量包、不重传大图，
+POST 到 dev server 的 `/__debug/report`（请求体上限 24MB）。
+
+**命令行侧怎么用**
+- `scripts/diagnose-segment.mjs`：Pillow 解码 + mock `Image` / `canvas`，直接跑生产
+  `segmentCharacters`；打印逐层中间量（阈值、边框命中、墨迹占比、列带、pitch 等）与每框原图坐标，
+  产出带编号红框叠加图、`*.ink.bin` 位压缩掩码、`*.json` 框坐标。需要 Pillow；
+  `numpy` 只用于重新生成夹具，诊断不需要。
+- `current.json` / `state.json` 里的 `stores.segmentations` 是**页面上正在显示的框**。
+  用 `hashImageData` 重建当前图 dataUrl（注意带 `data:` 前缀）即可命中缓存键，
+  与离线复现结果逐框对照，立刻区分「算法算错」还是「缓存 / 手动编辑造成的差异」。
+- `scripts/verify-couplet-candidate.mjs`：候选算法 A/B 验证范式 —— 把 `segment.js` 读成文本、
+  在内存里注入候选函数写到 `/tmp` 后动态 import，对同一批掩码跑 `segmentFromMasks` 逐框比对，
+  **全程不改 `src/`**。定位到判据、确认影响范围后再决定要不要落地。
+
+**反馈模板**：dev server 保持运行、停在出问题的那一页，然后说一句
+「我停在当前字帖页，看一下切分」+ 期望（例如「第 3 列应是 5 个字，现在切了 8 框」）
+即可，无需任何附件。读 `$DEBUG_DIR/current.json` 就知道是哪张图、页面显示哪些框，
+再跑诊断脚本定位到具体判据。
+
+**边界与坑**
+- 插件是 `apply: 'serve'`，生产构建与 iOS / Android 包完全不含这段代码；
+  `CALLIGRAPHY_DEBUG_BRIDGE=0 npm run dev` 可关闭。数据只在 localhost 流动、
+  只写本机临时目录，不联网；`current.<ext>` 换页即覆盖，要留档先自行复制。
+- 改完 `segment.js` 后 Vite 可能只热更组件、不整页 reload：浏览器仍持有旧的
+  `segmentCharacters`，却用新 `segmentCache.js` 把旧框打上新算法版本写回缓存，
+  `canReuseSegmentation` 会误判有效、光刷新也不重算。若发现「版本号已更新但框数没变」，
+  **硬刷新 Cmd+Shift+R → 打开字帖 → 切分面板点「重新切分」** 强制覆盖缓存
+  （正式发版整包代码同时更新，旧版本缓存自动过期，不会有此问题）。
 
 ### 原生打包
 
@@ -316,8 +381,10 @@ node scripts/test-segment-fixtures.mjs   # 真实图 golden 快照 24 项
 66% 骗过反色判据，旧切 16 框穿字；`detectContentBorder` 零化边框后切 23 框，
 右联 12 字逐字成框、左联「觀其」合并为一框；`free` 与 `grid` 两个 case 守住有格开关不改变结果）。
 放宽判据另用 25 张 `docs/screens/` 截图做过新旧全链路逐框对比，确认除该对联外零变化。
-`couplet-vertical / free` 与 `yi-grid / grid` 记录的是已知缺陷现状（左联下半按列宽
-均分导致错位、水平格线漏检一半），将来修好时会触发差异，需有意更新快照。
+`yi-grid / grid` 仍记录水平格线漏检一半的已知缺陷现状，将来修好时会触发差异，
+需有意更新快照。`couplet-vertical / free` 的左联等分错位已由 **v12** 修复
+（15 → 14 框，左联 8 → 7 框、切点落在真实字间空白），落地时同步更新了这一套快照，
+其余 21 个 case 逐框零变化。
 v9 落地时另更新了两套：`cursive-vertical / free` 有一个框边界吸附到真实空白
 （该夹具备注本就写明算法改动需 `--update`），`full-screenshot / free` 的退化检测
 由 171 框变 165 框；其余 11 套逐框零变化。
@@ -382,8 +449,9 @@ docs/screens/              界面截图
 - **微信抓取有频率限制**：短时间多次请求会被限流，需等待 1~2 分钟
 - **密集粘连字帖切分不准**：字与字连笔时投影法无法可靠分开（如行草），需在编辑态用
   「本列切线 / 候选线」逐字修正；无格字帖的字位错落不做自动推断。
-  高字带被机械等分切开的问题已由 v9 的空白引导切分修正，但 `cursive-tall-glyph`
-  仍留有污渍框、扁框与印章框，需要编辑态手动删改
+  高字带被机械等分切开的问题已由 v9 的空白引导切分（≤3 等分）与 v12 的超长带
+  按本列字距重切（≥4 等分）修正，但 `cursive-tall-glyph` 仍留有污渍框、扁框与
+  印章框，需要编辑态手动删改
 - **iOS 超大图仍可能触发内存终止**：已把常驻基线从「最多 20 张完整 base64」改成
   「只读字帖元数据 + 最多 1 份当前页原图」，并做到临时 `Image` / canvas 用完即释放、
   候选线复用切分掩码、缩略图落盘且按需读取、关闭字帖清空全部内存引用。

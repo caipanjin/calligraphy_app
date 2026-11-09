@@ -49,6 +49,20 @@ const SPLIT_GUIDE_SNAP_RATIO = 0.3;      // 吸附搜索半径 = 0.3×等分步�
 const SPLIT_GUIDE_CUT_DENSITY = 0.15;    // 切点 7 行平均墨迹 ≤ 15% 视为本来就空
 const SPLIT_GUIDE_DENSITY_WINDOW = 3;    // 密度窗口 ±3 行
 
+// —— 超长字带按本列真实字距重切（v12）——
+// 红底双联左联下半 5 个字挤成一条 h=818（≈4.8×列宽）的长带，字间空白只有
+// 3~10px，全局 gapRow=13px 全被当成笔画间隙，旧逻辑按列宽五等分，切出 5 个
+// 等高、互相重叠、横穿笔画的框。该带墨迹密度 0.518 > 0.35，blankGuidedCuts
+// 的密度护栏也直接返回 null，放宽份数/带高护栏对这类图完全无效。
+// 因此只在「带高 ≥4×列宽 且 等分份数 ≥4」时，用更小的 minGap 在带内重新
+// 找字带；两道护栏（子带数接近等分数、每条带高接近一个字）挡住界面截图 /
+// 格线字帖被误触发，不满足时完全回退原逻辑。
+const REBAND_MIN_BAND_RATIO = 4;
+const REBAND_GAP_RATIO = 0.02;
+const REBAND_SIZE_RATIO = 0.35;
+const REBAND_HEIGHT_MIN_RATIO = 0.8;
+const REBAND_HEIGHT_MAX_RATIO = 1.6;
+
 // 注意：若本文件的改动会改变「同一张图切出哪些框」，
 // 必须把 src/utils/segmentCache.js 的 SEGMENT_ALGORITHM_VERSION +1，
 // 否则用户装了新版仍会命中旧算法缓存，看不到新结果。
@@ -1221,6 +1235,48 @@ export const blankGuidedCuts = (band, referenceSize, idealCuts, step, parts, gui
 };
 
 /**
+ * 超长字带按本列行投影重切（竖排专用，v12）。
+ *
+ * 只在带高 ≥4×列宽、等分份数 ≥4 时启用：用更小的 minGap 在本列行投影里
+ * 重新找字带，让 3~10px 的字间空白也能分开；找不到可信字带就返回 null，
+ * 由调用方回退到原来的空白引导切分 / 机械等分，行为逐字节不变。
+ *
+ * @param {{start:number,end:number}} band 超长字带
+ * @param {number} referenceSize 列宽
+ * @param {{ink:Uint8Array,width:number,x0:number,x1:number}} guide 墨迹掩码与列范围
+ * @param {number} parts 原逻辑会把它等分成的份数
+ * @returns {{start:number,end:number}[]|null} 重切出的字带；null 表示回退
+ */
+const rebandLongGlyphBand = (band, referenceSize, guide, parts) => {
+  const { ink, width, x0, x1 } = guide;
+  const size = band.end - band.start;
+  if (size < referenceSize * REBAND_MIN_BAND_RATIO) return null;
+
+  const profile = new Uint32Array(size);
+  for (let i = 0; i < size; i += 1) {
+    const row = (band.start + i) * width;
+    let value = 0;
+    for (let x = x0; x < x1; x += 1) value += ink[row + x];
+    profile[i] = value;
+  }
+  const sub = findBands(profile, {
+    relInk: INK_RATIO,
+    minGap: Math.max(2, Math.round(referenceSize * REBAND_GAP_RATIO)),
+    minSize: Math.max(2, Math.round(referenceSize * REBAND_SIZE_RATIO))
+  });
+  // 界面截图 / 格线字帖里，小 minGap 会把一条长带切成大量碎块，或把
+  // 20 等分塌成 3 带；要求子带数接近原等分数、带高接近一个正常字。
+  if (sub.length < Math.max(3, parts - 1) || sub.length > parts + 1) return null;
+  const heights = sub.map((item) => item.end - item.start);
+  if (heights.some((h) => h < referenceSize * REBAND_HEIGHT_MIN_RATIO ||
+                          h > referenceSize * REBAND_HEIGHT_MAX_RATIO)) return null;
+  return sub.map((item) => ({
+    start: item.start + band.start,
+    end: item.end + band.start
+  }));
+};
+
+/**
  * 拆分过高的字块（竖排专用）
  *
  * 竖排时一个字的高度应接近列宽（实测比值 0.7~1.1）。
@@ -1247,6 +1303,14 @@ export const splitTallGlyphs = (bands, referenceSize, maxRatio = 1.7, guide = nu
     const step = size / parts;
     const ideal = [];
     for (let i = 1; i < parts; i += 1) ideal.push(Math.round(band.start + i * step));
+    // v12：超长带先按本列真实字距重切；找不到可信字带则完全回退原逻辑
+    const rebanded = (parts >= 4 && guide)
+      ? rebandLongGlyphBand(band, referenceSize, guide, parts)
+      : null;
+    if (rebanded) {
+      result.push(...rebanded);
+      return;
+    }
     const cuts = guide ? blankGuidedCuts(band, referenceSize, ideal, step, parts, guide) : null;
 
     if (!cuts) {

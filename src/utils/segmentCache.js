@@ -25,8 +25,9 @@ export const SEGMENT_STORE = 'segmentations';
  *   v9 = 高字带按空白引导切分（行草单字不再被机械等分水平切开）
  *   v10 = 字框水平扩展改用列间空隙限额、左右独立（探出笔画不再被裁；单列大字宽度上限放宽到整幅）
  *   v11 = 检测并零化装裱边框（白纸黑字 + 深色装裱边不再被误反色/边框污染切碎）
+ *   v12 = 超长字带按本列真实字距重切（红底双联左联下半不再被五等分穿字）
  */
-export const SEGMENT_ALGORITHM_VERSION = 11;
+export const SEGMENT_ALGORITHM_VERSION = 12;
 
 const MANUAL_SUFFIX = ':manual';
 
