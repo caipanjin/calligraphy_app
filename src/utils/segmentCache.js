@@ -23,8 +23,9 @@ export const SEGMENT_STORE = 'segmentations';
  *   v7 = 单列大字的字框宽度上限放宽到 0.95W（0.85W 会删光正确框，返回切分失败）
  *   v8 = 多列版式识别笔画级伪字距（正文列 + 印章列不再被拆成 6 列 / 53 个小框）
  *   v9 = 高字带按空白引导切分（行草单字不再被机械等分水平切开）
+ *   v10 = 字框水平扩展改用列间空隙限额、左右独立（探出笔画不再被裁；单列大字宽度上限放宽到整幅）
  */
-export const SEGMENT_ALGORITHM_VERSION = 9;
+export const SEGMENT_ALGORITHM_VERSION = 10;
 
 const MANUAL_SUFFIX = ':manual';
 

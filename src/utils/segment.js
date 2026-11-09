@@ -27,7 +27,9 @@ const MAX_SIZE_RATIO = 0.85;
 // 列带宽 469px，量测后框宽 473px > 0.85W(467.5)，两个正确框会被异常块
 // 过滤全部删掉、返回「切分失败」。命中 isSingleWideColumn 时改用这个上限，
 // 高度上限仍保持 0.85H（整页被当成一个字的高框照样被挡住）。
-const WIDE_COLUMN_MAX_WIDTH_RATIO = 0.95;
+// v10 放宽到 1.0W：水平扩展改用列间空隙后，单列大字的笔画可合法伸到近整幅宽
+// （「吝驕」拓片次字框宽 541px = 整幅），0.95W 会把这种正确框误删成 1 框。
+const WIDE_COLUMN_MAX_WIDTH_RATIO = 1;
 export const maxBoxWidthRatio = (singleWideColumn) =>
   singleWideColumn === true ? WIDE_COLUMN_MAX_WIDTH_RATIO : MAX_SIZE_RATIO;
 // 判定为「多个字粘在一起」的倍数（相对中位字高/宽）
@@ -108,8 +110,13 @@ export const otsuThreshold = (histogram, total) => {
 /**
  * 生成墨迹掩码：缩放 → 灰度 → Otsu 二值化 → 反色修正
  * 返回的 scale 是「分析图坐标 / 原图坐标」
+ *
+ * withFaint=false 时跳过格线掩码（faint 返回 null）：faint 只有「有格字帖」
+ * 的 detectGridLines 用得上，而它的逐像素 7×7 邻域采样 + 排序是 buildInkMask
+ * 里最贵的一段（1600px 图上百万像素 × 25 次采样）。免费布局与候选切线都只
+ * 需要 ink，跳过可省掉这段主线程开销和一份 W×H 的缓冲。
  */
-export const buildInkMask = (img, maxSize = MAX_ANALYSIS_SIZE) => {
+export const buildInkMask = (img, maxSize = MAX_ANALYSIS_SIZE, { withFaint = true } = {}) => {
   const naturalWidth = img.naturalWidth || img.width;
   const naturalHeight = img.naturalHeight || img.height;
   const ratio = Math.min(1, maxSize / Math.max(naturalWidth, naturalHeight));
@@ -149,28 +156,32 @@ export const buildInkMask = (img, maxSize = MAX_ANALYSIS_SIZE) => {
 
   // 格线掩码：比「局部背景」略暗、但不是墨迹的细结构
   // （格线通常是浅褐/浅灰细线，Otsu 会把它归入背景，需单独提取）
-  const faint = new Uint8Array(width * height);
-  const window = 7;
-  for (let y = 0; y < height; y += 1) {
-    for (let x = 0; x < width; x += 1) {
-      const p = y * width + x;
-      if (ink[p]) continue;
-      // 局部背景：窗口内灰度中位数
-      const values = [];
-      for (let dy = -window; dy <= window; dy += 3) {
-        const yy = y + dy;
-        if (yy < 0 || yy >= height) continue;
-        for (let dx = -window; dx <= window; dx += 3) {
-          const xx = x + dx;
-          if (xx < 0 || xx >= width) continue;
-          values.push(gray[yy * width + xx]);
+  // 只有有格字帖的格线检测需要它；调用方明确不需要时整段跳过
+  let faint = null;
+  if (withFaint) {
+    faint = new Uint8Array(width * height);
+    const window = 7;
+    for (let y = 0; y < height; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        const p = y * width + x;
+        if (ink[p]) continue;
+        // 局部背景：窗口内灰度中位数
+        const values = [];
+        for (let dy = -window; dy <= window; dy += 3) {
+          const yy = y + dy;
+          if (yy < 0 || yy >= height) continue;
+          for (let dx = -window; dx <= window; dx += 3) {
+            const xx = x + dx;
+            if (xx < 0 || xx >= width) continue;
+            values.push(gray[yy * width + xx]);
+          }
         }
+        if (values.length === 0) continue;
+        values.sort((a, b) => a - b);
+        const background = values[Math.floor(values.length / 2)];
+        const delta = background - gray[p];
+        if (delta > 6 && gray[p] > threshold) faint[p] = 1;
       }
-      if (values.length === 0) continue;
-      values.sort((a, b) => a - b);
-      const background = values[Math.floor(values.length / 2)];
-      const delta = background - gray[p];
-      if (delta > 6 && gray[p] > threshold) faint[p] = 1;
     }
   }
 
@@ -530,6 +541,11 @@ export const isStrokeLevelPitch = (colBands, W, pitch) => {
  * 若直接用列宽当字框宽度，稍宽的字左右会被裁掉。
  * 这里沿着这一行扫描墨迹，把左右边界扩到字的真实边缘。
  *
+ * 书法字本身有大小差异，字框宽度不必一致、允许相邻框重叠：因此左右各自
+ * 独立限额，上限取「到相邻列带边界的距离」（列间空隙）与列宽比例的较小者，
+ * 允许伸满列间空隙但不跨进邻列。旧版用「到最近墨迹的距离 ×45%」会在本字
+ * 笔画穿过列边界时把限额锁死 2px（最近墨迹就是笔画自己），裁掉长捺/撇尖。
+ *
  * @param {Uint8Array} ink 墨迹掩码
  * @param {number} width 图宽
  * @param {number} y0 字带上边界
@@ -537,6 +553,8 @@ export const isStrokeLevelPitch = (colBands, W, pitch) => {
  * @param {number} colStart 列左边界
  * @param {number} colEnd 列右边界
  * @param {number} maxOverflow 允许向两侧扩展的最大比例（相对列宽）
+ * @param {number} gapLeft 到左侧相邻列带边界的距离（无邻居为 Infinity）
+ * @param {number} gapRight 到右侧相邻列带边界的距离（默认同 gapLeft）
  */
 export const measureGlyphHorizontally = (
   ink,
@@ -546,19 +564,15 @@ export const measureGlyphHorizontally = (
   colStart,
   colEnd,
   maxOverflow = 0.6,
-  neighborGap = Infinity
+  gapLeft = Infinity,
+  gapRight = gapLeft
 ) => {
   const columnWidth = colEnd - colStart;
-  // 扩展上限：先受列宽比例限制，再受「到相邻墨迹的空隙」限制
-  // 左右分别限额：各自不超过「该方向到最近墨迹的距离」的 45%，
-  // 且不超过列宽的 30%（字距密集的字帖上这是唯一安全的做法）
+  // 左右独立限额：各自不超过「到相邻列带边界的距离」与「列宽比例」的较小者。
+  // 允许伸满列间空隙（字框可重叠、宽度不必一致），但不跨进邻列；无邻居时按列宽比例。
   const byRatio = Math.max(2, Math.round(columnWidth * maxOverflow));
-  // 有相邻墨迹时以空隙为准（各留 45%），否则按列宽比例
-  const byGap = Number.isFinite(neighborGap)
-    ? Math.max(2, Math.round(neighborGap * 0.45))
-    : byRatio;
-  const limitLeft = Math.max(2, Math.min(byRatio, byGap));
-  const limitRight = limitLeft;
+  const limitLeft = Math.max(2, Math.min(byRatio, Number.isFinite(gapLeft) ? gapLeft : byRatio));
+  const limitRight = Math.max(2, Math.min(byRatio, Number.isFinite(gapRight) ? gapRight : byRatio));
 
   const hasInkAt = (x) => {
     for (let y = y0; y < y1; y += 1) {
@@ -1378,15 +1392,9 @@ export const segmentFromMasks = (
     ? mergeNarrowGaps(splitColBands.filter((band) => !isNegligibleEdgeBand(band, W)), W)
     : splitColBands;
 
-  // 版面判定：
-  // 1) 只有一列（多行）→ 竖排；只有一行（多列）→ 横排
-  // 2) 少行多列（行数 ≤2 且列数 ≥3）→ 横排
-  // 3) 其余默认竖排（书法字帖的常态）
-  // 判定只影响阅读顺序与标签，用户可在面板上手动切换
-  // 字帖一律按竖排处理（中文书法几乎都是竖排，自上而下、从右往左）
-  const detectLayout = () => 'vertical';
-
-  let layout = forcedLayout !== 'auto' ? forcedLayout : detectLayout();
+  // 字帖一律按竖排处理（中文书法几乎都是竖排，自上而下、从右往左）；
+  // 用户可在面板上手动切换横排。网格退化回退时可能改回竖排，故用 let
+  let layout = forcedLayout !== 'auto' ? forcedLayout : 'vertical';
 
   const toSource = (box) => ({
     x: box.x / scale,
@@ -1403,8 +1411,10 @@ export const segmentFromMasks = (
     columnCount = colBands.length;
     // 竖排从右往左读
     // 遍历顺序无关紧要：最终顺序由 sortByReadingOrder 统一决定
-    colBands.forEach((col) => {
+    colBands.forEach((col, colIndex) => {
       const columnWidth = col.end - col.start;
+      const prevCol = colBands[colIndex - 1];
+      const nextCol = colBands[colIndex + 1];
       // 注意：竖排的列内是按「高度」切字，而 pitch 是横向周期，不能用于此处的等分
       const charBands = splitTallGlyphs(
         mergeSplitGlyphs(
@@ -1431,29 +1441,12 @@ export const segmentFromMasks = (
       );
       columnDetail.push({ width: col.end - col.start, bands: charBands.length, sizes: charBands.map((b) => b.end - b.start) });
       charBands.forEach((band, bandIndex) => {
-        // 本字在「自己这一行范围内」到左右相邻墨迹的实际空隙
-        // 这一侧到最近一段「非本字墨迹」的空白宽度
-        // 直接量「紧邻边界的空白」；若边界处就是墨迹，说明字已贴着边界，扩展受限
-        const scanGap = (fromX, step) => {
-          let x = fromX;
-          let blank = 0;
-          while (x >= 0 && x < W) {
-            let has = false;
-            for (let y = band.start; y < band.end; y += 1) {
-              if (ink[y * W + x]) { has = true; break; }
-            }
-            if (has) break;
-            blank += 1;
-            x += step;
-          }
-          if (x < 0 || x >= W) return Infinity;
-          return blank;
-        };
-
-        const gapLeft = scanGap(col.start - 1, -1);
-        const gapRight = scanGap(col.end, 1);
-        // 左右各自最多扩到「相邻墨迹的一半」，两边加起来不会重叠
-        const horizontalGap = Math.min(gapLeft, gapRight);
+        // 水平扩展限额取「到相邻列带边界的距离」（列间空隙），左右独立。
+        // 不再量「到最近墨迹的距离」——本字笔画穿过列边界时，最近墨迹就是笔画
+        // 自己，旧算法据此把限额锁死 2px，裁掉长捺/撇尖。允许伸满列间空隙
+        // （字框可重叠、宽度不必一致），但不跨进邻列；无邻居时为 Infinity。
+        const gapLeft = prevCol ? col.start - prevCol.end : Infinity;
+        const gapRight = nextCol ? nextCol.start - col.end : Infinity;
 
         // 1) 先按字自身墨迹取宽，避免略宽的字被列边界裁掉
         const measured = measureGlyphHorizontally(
@@ -1464,7 +1457,8 @@ export const segmentFromMasks = (
           col.start,
           col.end,
           0.6,
-          horizontalGap
+          gapLeft,
+          gapRight
         );
         const boxLeft = Math.min(col.start, measured.left);
         const boxRight = Math.max(col.end, measured.right);
@@ -1567,7 +1561,9 @@ export const segmentFromMasks = (
       if (box.height >= medianH * 0.45) return true;       // 高度正常：保留
 
       // 高度偏小：只有「宽度接近正常字宽」才是笔画简单的字（如「一」）。
-      if (box.width < medianW * 0.6) return false;
+      // v10 阈值 0.6→0.5：水平扩展放宽后框普遍变宽，90 分位基准被抬高，
+      // 0.6 会把行草里真实的小字（实测 69×66，宽比 0.575）误判成碎片删掉。
+      if (box.width < medianW * 0.5) return false;
 
       // 但贴着图片上下边缘的矮块仍是残块（页面被截断的半行）。
       // 实测：密集字帖底部常出现 宽比 1.0、高比 0.27 的贴边残块，
@@ -1661,7 +1657,8 @@ export const segmentCharacters = async (imageSrc, options = {}) => {
   const { maxSize = MAX_ANALYSIS_SIZE } = options;
   const img = await loadImageElement(imageSrc);
   try {
-    const mask = buildInkMask(img, maxSize);
+    // faint 只有有格字帖的格线检测用得上，免费布局跳过最贵的邻域采样
+    const mask = buildInkMask(img, maxSize, { withFaint: Boolean(options.hasGrid) });
     // 把候选线需要的掩码交给调用方复用，避免编辑器再解码一次原图。
     // 只传 ink：faint 只有自动切分用得上，常驻会白占一份 1600px 级缓冲。
     if (typeof options.onMask === 'function') {

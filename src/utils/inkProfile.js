@@ -110,9 +110,10 @@ export const getCandidateBoundaries = async (imageSrc, options = {}) => {
   if (!mask) {
     // 缓存命中自动切分时拿不到 mask，才会走这里。用完立刻释放位图，
     // 并把结果裁成精简结构，避免把整份 faint 掩码留在编辑器里。
+    // 候选切线只用 ink，直接告诉 buildInkMask 跳过 faint 的邻域采样。
     const img = await loadImageElement(imageSrc);
     try {
-      const full = buildInkMask(img);
+      const full = buildInkMask(img, undefined, { withFaint: false });
       mask = { width: full.width, height: full.height, scale: full.scale, ink: full.ink };
     } finally {
       releaseImageElement(img);

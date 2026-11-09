@@ -326,11 +326,12 @@ check('单列大字：segmentFromMasks 必须把判据接进字距决策', () =>
 // 而 0.85W 只有 467.5 —— 两个正确框全被异常块过滤删掉，返回 reason=empty
 check('单列大字：宽度上限只在命中时放宽（真实几何 473 vs 467.5）', () => {
   assert.equal(maxBoxWidthRatio(false), 0.85);
-  assert.equal(maxBoxWidthRatio(true), 0.95);
+  assert.equal(maxBoxWidthRatio(true), 1, 'v10 放宽到整幅宽：单列大字笔画可合法伸到近整幅');
   assert.equal(maxBoxWidthRatio(undefined), 0.85);
   assert.equal(maxBoxWidthRatio(1), 0.85, '只有严格的布尔 true 才放宽');
   assert.ok(473 > 550 * maxBoxWidthRatio(false), '旧上限会删掉 473px 的框');
   assert.ok(473 < 550 * maxBoxWidthRatio(true), '新上限能保留 473px 的框');
+  assert.ok(541 <= 541 * maxBoxWidthRatio(true), '整幅宽的合法框（吝驕次字 541px）也要保留');
 });
 
 check('单列大字：尺寸过滤必须接进主链路，且高度上限保持 0.85H', () => {
@@ -786,6 +787,57 @@ check('按字取宽：扩展有上限，不会无限吞并邻列', () => {
   assert.ok(m.extendRight <= 25, `extendRight=${m.extendRight} 应 <= 25`);
 });
 
+// —— v10 字框裁笔画修复：左右独立限额 + 列间空隙 ——
+check('按字取宽：左右限额独立，一侧贴边不连坐另一侧', () => {
+  const W = 300;
+  const H = 100;
+  const ink = new Uint8Array(W * H);
+  for (let y = 10; y < 40; y += 1) {
+    for (let x = 0; x < W; x += 1) ink[y * W + x] = 1; // 整行有墨
+  }
+  // 列 100-150（宽 50，byRatio=30）；左侧邻列近（gap=5），右侧无邻居
+  const m = measureGlyphHorizontally(ink, W, 10, 40, 100, 150, 0.6, 5, Infinity);
+  assert.equal(m.extendLeft, 5, '左侧受列间空隙 5px 限制');
+  assert.equal(m.extendRight, 30, '右侧无邻居应按列宽比例扩满，不被左侧连坐');
+});
+
+check('按字取宽：笔画穿过列边界时跟到真实边缘，不锁死 2px', () => {
+  const W = 300;
+  const H = 100;
+  const ink = new Uint8Array(W * H);
+  // 列 100-150，但字的笔画实际占 80-170（左右都穿过列边界）
+  for (let y = 10; y < 40; y += 1) {
+    for (let x = 80; x < 170; x += 1) ink[y * W + x] = 1;
+  }
+  // 列间空隙充足（左右各 40），旧算法量「到最近墨迹」会得 0 → 锁死 2px 裁掉笔画
+  const m = measureGlyphHorizontally(ink, W, 10, 40, 100, 150, 0.6, 40, 40);
+  assert.ok(m.left <= 80, `left=${m.left} 应收进左侧探出笔画`);
+  assert.ok(m.right >= 170, `right=${m.right} 应收进右侧探出笔画`);
+});
+
+check('按字取宽：伸满列间空隙但不跨进邻列', () => {
+  const W = 300;
+  const H = 100;
+  const ink = new Uint8Array(W * H);
+  for (let y = 10; y < 40; y += 1) {
+    for (let x = 0; x < W; x += 1) ink[y * W + x] = 1;
+  }
+  // 左右邻列各只留 8px 空隙：扩展应被空隙封顶，不吞并邻列
+  const m = measureGlyphHorizontally(ink, W, 10, 40, 100, 150, 0.6, 8, 8);
+  assert.ok(m.extendLeft <= 8, `extendLeft=${m.extendLeft} 应 <= 8`);
+  assert.ok(m.extendRight <= 8, `extendRight=${m.extendRight} 应 <= 8`);
+});
+
+check('字框裁笔画：主链路用列带边界距离限额，碎片宽度阈值放宽到 0.5', () => {
+  const src = fs.readFileSync(new URL('../src/utils/segment.js', import.meta.url), 'utf8');
+  assert.ok(/const gapLeft = prevCol \? col\.start - prevCol\.end : Infinity;/.test(src),
+    '水平限额应取到相邻列带边界的距离，而非到最近墨迹的距离');
+  assert.ok(/const gapRight = nextCol \? nextCol\.start - col\.end : Infinity;/.test(src),
+    '右侧限额应独立取到右邻列带边界的距离');
+  assert.ok(/if \(box\.width < medianW \* 0\.5\) return false;/.test(src),
+    '碎片过滤宽度阈值应为 0.5，保住行草真实小字');
+});
+
 check('按字取高：笔画向下探出时扩到下边界', () => {
   const W = 100;
   const H = 200;
@@ -1000,6 +1052,33 @@ await checkAsync('真实解码链路：释放 canvas 与位图后掩码/结果�
     assert.equal(images[0].onload, null);
     assert.equal(canvases[1].width, 0, '切分用的 canvas 也应释放');
   });
+});
+
+await checkAsync('withFaint=false 跳过格线掩码，ink 与默认完全一致', async () => {
+  await withMockDom(async () => {
+    const img = { naturalWidth: 8, naturalHeight: 4 };
+    const full = buildInkMask(img, 8);
+    const lite = buildInkMask(img, 8, { withFaint: false });
+    assert.equal(lite.faint, null, '不需要时应返回 null 而非白算一份');
+    assert.deepEqual(Array.from(lite.ink), Array.from(full.ink), 'ink 必须逐像素一致');
+    assert.equal(lite.width, full.width);
+    assert.equal(lite.height, full.height);
+    assert.equal(lite.scale, full.scale);
+    assert.equal(lite.threshold, full.threshold);
+  });
+});
+
+check('segmentCharacters 按 hasGrid 决定是否计算 faint', () => {
+  const src = fs.readFileSync(new URL('../src/utils/segment.js', import.meta.url), 'utf8');
+  const body = src.slice(src.indexOf('export const segmentCharacters'));
+  assert.ok(/withFaint:\s*Boolean\(options\.hasGrid\)/.test(body),
+    '免费布局应跳过 faint；有格模式必须仍然计算');
+});
+
+check('候选切线构建掩码时显式跳过 faint', () => {
+  const src = fs.readFileSync(new URL('../src/utils/inkProfile.js', import.meta.url), 'utf8');
+  assert.ok(/buildInkMask\(img,\s*undefined,\s*\{\s*withFaint:\s*false\s*\}\)/.test(src),
+    '候选切线只用 ink，不应白算 faint');
 });
 
 console.log(`\n${passed} 项通过`);
