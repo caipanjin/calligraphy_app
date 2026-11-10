@@ -18,19 +18,19 @@
       "versions": [
         {
           "version": "1.3.0",
-          "date": "2026-11-10T09:22:52+08:00",
+          "date": "2026-11-10T01:38:22+00:00",
           "localizedDescription": "书法临摹助手 1.3.0",
           "downloadURL": "https://caipanjin.github.io/calligraphy_app/altstore/ipa/calligraphy-1.3.0.ipa",
-          "size": 4367374,
-          "sha256": "980061b47f3b5b45614d0510b615734c1d69d77537acbd6304da235642cf982e",
+          "size": 4370773,
+          "sha256": "073531b38dbeebd31747193654da7b45fb33e23750a7a614206ed93149e47537",
           "minOSVersion": "13.0"
         }
       ],
       "version": "1.3.0",
-      "versionDate": "2026-11-10T09:22:52+08:00",
+      "versionDate": "2026-11-10T01:38:22+00:00",
       "versionDescription": "书法临摹助手 1.3.0",
       "downloadURL": "https://caipanjin.github.io/calligraphy_app/altstore/ipa/calligraphy-1.3.0.ipa",
-      "size": 4367374,
+      "size": 4370773,
       "minOSVersion": "13.0"
     }
   ],
