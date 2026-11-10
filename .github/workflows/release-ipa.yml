@@ -1,0 +1,138 @@
+name: Release IPA to GitHub Releases
+
+# 推送 v* 标签时自动：编译未签名 IPA → 发布 Release → 更新 AltStore Source JSON 并提交回 main。
+# 之后手机 AltStore 刷新源即可收到更新，无需手工上传任何文件。
+#
+# 用法：
+#   git tag v1.4.0 && git push origin v1.4.0
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '版本号（留空则用 package.json）'
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: 解析版本号
+        id: ver
+        run: |
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            V="${{ github.event.inputs.version }}"
+          elif [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            V="${GITHUB_REF_NAME#v}"
+          else
+            V="$(node -p "require('./package.json').version")"
+          fi
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          echo "tag=v$V"     >> "$GITHUB_OUTPUT"
+          echo "ipa=calligraphy-$V.ipa" >> "$GITHUB_OUTPUT"
+
+      - name: 安装依赖
+        run: npm ci --legacy-peer-deps
+
+      - name: 构建未签名 IPA
+        run: bash scripts/build-unsigned-ipa.sh Release "build/${{ steps.ver.outputs.ipa }}"
+
+      - name: 计算 size / sha256
+        id: meta
+        run: |
+          IPA="build/${{ steps.ver.outputs.ipa }}"
+          echo "size=$(stat -f%z "$IPA")" >> "$GITHUB_OUTPUT"
+          echo "sha256=$(shasum -a 256 "$IPA" | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+          MIN_OS="$(unzip -p "$IPA" 'Payload/App.app/Info.plist' | plutil -extract MinimumOSVersion raw -o - - 2>/dev/null || echo 13.0)"
+          echo "min_os=$MIN_OS" >> "$GITHUB_OUTPUT"
+
+      - name: 发布 Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ steps.ver.outputs.tag }}"
+          IPA="build/${{ steps.ver.outputs.ipa }}"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$IPA" --clobber
+          else
+            gh release create "$TAG" "$IPA" \
+              --title "书法临摹助手 ${{ steps.ver.outputs.version }}" \
+              --notes "未签名 IPA，供 AltStore / Sideloadly 用 Apple ID 签名后安装。
+
+          - 版本：${{ steps.ver.outputs.version }}
+          - 大小：${{ steps.meta.outputs.size }} 字节
+          - sha256：\`${{ steps.meta.outputs.sha256 }}\`
+          - 最低系统：iOS ${{ steps.meta.outputs.min_os }}"
+          fi
+
+      - name: 更新 AltStore Source JSON
+        run: |
+          python3 - <<'PY'
+          import json, os
+          from datetime import datetime
+
+          version = os.environ['VERSION']
+          path = 'altstore/source.json'
+          with open(path, encoding='utf-8') as f:
+              src = json.load(f)
+
+          app = src['apps'][0]
+          url = f"https://github.com/{os.environ['GITHUB_REPOSITORY']}/releases/download/v{version}/{os.environ['IPA_NAME']}"
+          now = datetime.now().astimezone().isoformat(timespec='seconds')
+
+          entry = {
+              "version": version,
+              "date": now,
+              "localizedDescription": f"书法临摹助手 {version}",
+              "downloadURL": url,
+              "size": int(os.environ['SIZE']),
+              "sha256": os.environ['SHA256'],
+              "minOSVersion": os.environ['MIN_OS'],
+          }
+          versions = [v for v in app.get('versions', []) if v.get('version') != version]
+          versions.insert(0, entry)
+          app['versions'] = versions
+          app['version'] = version
+          app['versionDate'] = now
+          app['versionDescription'] = entry['localizedDescription']
+          app['downloadURL'] = url
+          app['size'] = entry['size']
+          app['minOSVersion'] = entry['minOSVersion']
+
+          with open(path, 'w', encoding='utf-8') as f:
+              json.dump(src, f, ensure_ascii=False, indent=2)
+              f.write('\n')
+          print('updated', path, '->', version)
+          PY
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+          IPA_NAME: ${{ steps.ver.outputs.ipa }}
+          SIZE: ${{ steps.meta.outputs.size }}
+          SHA256: ${{ steps.meta.outputs.sha256 }}
+          MIN_OS: ${{ steps.meta.outputs.min_os }}
+
+      - name: 提交 Source JSON
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add altstore/source.json
+          if git diff --cached --quiet; then
+            echo "no change"
+          else
+            git commit -m "chore(altstore): 发布 ${{ steps.ver.outputs.version }}，更新 Source JSON"
+            git push origin HEAD:main
+          fi

@@ -1,0 +1,22 @@
+{
+  "name": "书法临摹助手",
+  "identifier": "com.caipanjin.calligraphy.source",
+  "subtitle": "把字帖切成单字，逐字放大临摹",
+  "description": "书法临摹助手官方源。\n\n把任意字帖（手机拍照、公众号图片）切分成单字，逐字放大临摹。纯本地运行，无服务器、无账号、无模型依赖，所有数据都存在设备的 IndexedDB 里。\n\n本应用以未签名 IPA 分发，需由 AltStore 使用你自己的 Apple ID 完成签名与安装。",
+  "website": "https://github.com/caipanjin/calligraphy_app",
+  "apps": [
+    {
+      "name": "书法临摹助手",
+      "bundleIdentifier": "com.caipanjin.calligraphy",
+      "developerName": "caipanjin",
+      "subtitle": "把字帖切成单字，逐字放大临摹",
+      "localizedDescription": "把任意字帖（手机拍照、公众号图片）切分成单字，逐字放大临摹。\n\n• 自动切字：纯前端投影法切分，毫秒级完成，默认竖排从右往左\n• 手动修正：加框、区域切分、分界、合并、拆分，逐字修正切分结果\n• 单字临摹：拖动平移、双指缩放、minimap 全景导航、相邻字缩略图\n• 练习进度：停留 ≥ 3 秒自动记录，支持今日 / 近 7 天 / 累计统计\n• 从公众号导入：粘贴链接自动抓取正文图片，指纹去重\n• 纯本地运行：无服务器、无账号、无模型依赖，数据存在设备 IndexedDB",
+      "iconURL": "https://raw.githubusercontent.com/caipanjin/calligraphy_app/main/altstore/icon-512.png",
+      "tintColor": "8C4A2F",
+      "category": "education",
+      "screenshots": [],
+      "versions": []
+    }
+  ],
+  "news": []
+}
