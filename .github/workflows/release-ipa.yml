@@ -48,12 +48,17 @@ jobs:
       - name: 安装依赖
         run: npm ci --legacy-peer-deps
 
-      - name: 安装 CocoaPods 依赖
-        # ios/App/Pods 在 ios/.gitignore 第 2 行被忽略，CI 检出后必须重新 pod install，
-        # 否则 xcodebuild 会报：Unable to open base configuration reference file
-        # 'ios/App/Pods/Target Support Files/Pods-App/Pods-App.release.xcconfig'
-        # Podfile 里全是 :path 本地 pod（无远程源），不需要 --repo-update。
-        run: cd ios/App && pod install
+      - name: 构建 Web 资源
+        run: npm run build
+
+      - name: 生成 Capacitor 原生工程并安装 Pods
+        # ios/App/App/capacitor.config.json 和 config.xml 是 cap 生成的，被 ios/.gitignore
+        # 第 12-13 行忽略，CI 检出后不存在，xcodebuild 会报：
+        #   error: lstat(.../ios/App/App/config.xml): No such file or directory
+        #   error: lstat(.../ios/App/App/capacitor.config.json): No such file or directory
+        # cap sync 同时会把 dist/ 复制到 ios/App/App/public，并顺带跑 pod install
+        # （ios/App/Pods 被忽略，缺 Pods-App.release.xcconfig 也会导致构建失败）。
+        run: npx cap sync ios
 
       - name: 构建未签名 IPA
         run: bash scripts/build-unsigned-ipa.sh Release "build/${{ steps.ver.outputs.ipa }}"
