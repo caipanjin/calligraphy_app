@@ -40,11 +40,18 @@ https://raw.githubusercontent.com/caipanjin/calligraphy_app/main/altstore/source
    检查：`gh repo view caipanjin/calligraphy_app --json visibility`
    改公开：`gh repo edit caipanjin/calligraphy_app --visibility public --accept-visibility-change-consequences`
 
-2. **开启 GitHub Pages**，源选 `main` 分支根目录 `/`：
+2. **开启 GitHub Pages，构建源设为 GitHub Actions**（不是 branch/Jekyll）：
    ```bash
-   gh api -X POST repos/caipanjin/calligraphy_app/pages \
-     -f 'source[branch]=main' -f 'source[path]=/'
+   gh api -X POST repos/caipanjin/calligraphy_app/pages -f 'build_type=workflow'
    ```
+   部署由 `.github/workflows/pages.yml` 完成，只发布 `altstore/` 目录。
+
+   > 为什么不用 branch/Jekyll 模式：本仓库用 legacy 构建时反复报 `Page build failed.`
+   > 且不给出具体原因，站点内容会停在旧版本。Actions 模式日志可控。
+
+   > 部署锁是按 commit SHA 绑定的。若某次部署卡在 `in_progress`（报
+   > `Deployment request failed ... due to in progress deployment`），
+   > 删 deployment、删环境、重置 Pages 都无法解锁——**推一个新 commit 换掉 build version 即可**。
 
 3. **登录 gh CLI**（本地发布需要）：`gh auth login`
 
@@ -119,5 +126,3 @@ AltStore → **Sources** → 右上角 `+` → 粘贴上面的 Pages 源地址�
 
 同时把顶层 `apps[0]` 的 `version` / `versionDate` / `versionDescription` / `downloadURL` / `size`
 同步为最新版，AltStore 用它显示「当前版本」。
-
-<!-- pages deploy trigger 2026-11-10 -->
