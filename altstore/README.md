@@ -119,3 +119,5 @@ AltStore → **Sources** → 右上角 `+` → 粘贴上面的 Pages 源地址�
 
 同时把顶层 `apps[0]` 的 `version` / `versionDate` / `versionDescription` / `downloadURL` / `size`
 同步为最新版，AltStore 用它显示「当前版本」。
+
+<!-- pages deploy trigger 2026-11-10 -->
