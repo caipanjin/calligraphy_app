@@ -78,14 +78,21 @@ SHA256="$(shasum -a 256 "$IPA_PATH" | awk '{print $1}')"
 echo "==> 2/5 size=$SIZE  sha256=$SHA256"
 
 # 从 IPA 里读真实版本号（以工程为准，避免 JSON 与包内不一致）
-MIN_OS="$(unzip -p "$IPA_PATH" 'Payload/App.app/Info.plist' 2>/dev/null \
-  | python3 -c "import sys,plistlib;d=plistlib.load(sys.stdin.buffer);print(d.get('MinimumOSVersion','13.0'))" 2>/dev/null || echo "13.0")"
-BUILD_VER="$(unzip -p "$IPA_PATH" 'Payload/App.app/Info.plist' 2>/dev/null \
-  | python3 -c "import sys,plistlib;d=plistlib.load(sys.stdin.buffer);print(d.get('CFBundleVersion','1'))" 2>/dev/null || echo "1")"
+# 注意：管道里的 stdin 不可 seek，必须用 plistlib.loads(read()) 而不是 load()。
+read_plist_key() {
+  unzip -p "$IPA_PATH" 'Payload/App.app/Info.plist' 2>/dev/null \
+    | python3 -c "import sys,plistlib;d=plistlib.loads(sys.stdin.buffer.read());print(d.get('$1',''))" 2>/dev/null || true
+}
+MIN_OS="$(read_plist_key MinimumOSVersion)"; [ -z "$MIN_OS" ] && MIN_OS="13.0"
+BUILD_VER="$(read_plist_key CFBundleVersion)"; [ -z "$BUILD_VER" ] && BUILD_VER="1"
 echo "    Info.plist: MinimumOSVersion=$MIN_OS  CFBundleVersion=$BUILD_VER"
 
 # ---------- 3. 创建 Release 并上传 IPA ----------
-DOWNLOAD_URL="https://github.com/${REPO}/releases/download/${TAG}/${IPA_NAME}"
+# 下载直链优先用 GitHub Pages：github.com/releases 直链在国内会超时（实测 20s 无响应），
+# 而 caipanjin.github.io 国内可直连（约 0.6s）。Release 仍然创建，作为归档与 changelog。
+PAGES_BASE="https://caipanjin.github.io/calligraphy_app"
+DOWNLOAD_URL="${PAGES_BASE}/altstore/ipa/${IPA_NAME}"
+RELEASE_URL="https://github.com/${REPO}/releases/download/${TAG}/${IPA_NAME}"
 
 if [ "$DRY_RUN" = "1" ]; then
   echo "==> 3/5 [dry-run] 将创建 Release $TAG 并上传 $IPA_PATH"
@@ -111,8 +118,14 @@ else
 - sha256：\`${SHA256}\`
 - 最低系统：iOS ${MIN_OS}
 
-AltStore 源地址：https://raw.githubusercontent.com/${REPO}/main/${SOURCE_JSON}"
+下载（国内可直连）：${DOWNLOAD_URL}
+AltStore 源地址：${PAGES_BASE}/altstore/source.json"
 fi
+
+# 同时把 IPA 放进 Pages 目录，保证国内可直连下载
+mkdir -p altstore/ipa
+cp -f "$IPA_PATH" "altstore/ipa/${IPA_NAME}"
+echo "    已复制到 altstore/ipa/${IPA_NAME}（由 GitHub Pages 托管）"
 
 # ---------- 4. 更新 Source JSON ----------
 echo "==> 4/5 更新 $SOURCE_JSON"
@@ -160,11 +173,12 @@ print(f"    versions 现有 {len(versions)} 条，最新 {versions[0]['version']
 PY
 
 # ---------- 5. 提交并推送 ----------
-echo "==> 5/5 提交并推送 Source JSON"
+echo "==> 5/5 提交并推送 Source JSON 与 IPA"
 GIT="/Applications/Xcode.app/Contents/Developer/usr/bin/git"
 command -v "$GIT" >/dev/null 2>&1 || GIT="git"
 
-"$GIT" add "$SOURCE_JSON" altstore/icon-512.png 2>/dev/null || "$GIT" add "$SOURCE_JSON"
+"$GIT" add "$SOURCE_JSON" altstore/icon-512.png "altstore/ipa/${IPA_NAME}" 2>/dev/null \
+  || "$GIT" add "$SOURCE_JSON"
 if "$GIT" diff --cached --quiet; then
   echo "    Source JSON 无变化，跳过提交"
 else
@@ -175,7 +189,8 @@ fi
 echo ""
 echo "✅ 发布完成"
 echo "   Release：https://github.com/${REPO}/releases/tag/${TAG}"
-echo "   IPA    ：${DOWNLOAD_URL}"
-echo "   源地址 ：https://raw.githubusercontent.com/${REPO}/main/${SOURCE_JSON}"
+echo "   IPA    ：${DOWNLOAD_URL}   （GitHub Pages 托管，国内可直连）"
+echo "   归档   ：${RELEASE_URL}"
+echo "   源地址 ：${PAGES_BASE}/altstore/source.json"
 echo ""
 echo "   手机 AltStore → Sources → 添加上述源地址，即可收到 ${VERSION} 更新。"

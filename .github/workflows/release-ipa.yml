@@ -48,6 +48,13 @@ jobs:
       - name: 安装依赖
         run: npm ci --legacy-peer-deps
 
+      - name: 安装 CocoaPods 依赖
+        # ios/App/Pods 在 ios/.gitignore 第 2 行被忽略，CI 检出后必须重新 pod install，
+        # 否则 xcodebuild 会报：Unable to open base configuration reference file
+        # 'ios/App/Pods/Target Support Files/Pods-App/Pods-App.release.xcconfig'
+        # Podfile 里全是 :path 本地 pod（无远程源），不需要 --repo-update。
+        run: cd ios/App && pod install
+
       - name: 构建未签名 IPA
         run: bash scripts/build-unsigned-ipa.sh Release "build/${{ steps.ver.outputs.ipa }}"
 

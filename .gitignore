@@ -30,6 +30,11 @@ keystore.properties
 # 忽略本地打包产物（根目录未签名 IPA 等）
 *.ipa
 
+# 例外：AltStore 源目录下的 IPA 要入库，由 GitHub Pages 直接托管，
+# 这样国内不翻墙也能下载（github.com/releases 直链在国内会超时）。
+!altstore/ipa/
+!altstore/ipa/*.ipa
+
 # 忽略测试报告和覆盖率报告
 coverage/
 reports/
