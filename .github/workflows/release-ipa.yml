@@ -73,6 +73,7 @@ jobs:
         run: |
           TAG="${{ steps.ver.outputs.tag }}"
           IPA="build/${{ steps.ver.outputs.ipa }}"
+          PAGES="https://caipanjin.github.io/calligraphy_app"
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" "$IPA" --clobber
           else
@@ -83,8 +84,19 @@ jobs:
           - 版本：${{ steps.ver.outputs.version }}
           - 大小：${{ steps.meta.outputs.size }} 字节
           - sha256：\`${{ steps.meta.outputs.sha256 }}\`
-          - 最低系统：iOS ${{ steps.meta.outputs.min_os }}"
+          - 最低系统：iOS ${{ steps.meta.outputs.min_os }}
+
+          下载（国内可直连）：${PAGES}/altstore/ipa/${{ steps.ver.outputs.ipa }}
+          AltStore 源地址：${PAGES}/altstore/source.json"
           fi
+
+      - name: 把 IPA 放入 Pages 目录
+        # 国内直连 github.com/releases 会超时，caipanjin.github.io 可直连，
+        # 所以 IPA 同时入库到 altstore/ipa/，由 GitHub Pages 托管为下载直链。
+        run: |
+          mkdir -p altstore/ipa
+          cp -f "build/${{ steps.ver.outputs.ipa }}" "altstore/ipa/${{ steps.ver.outputs.ipa }}"
+          ls -l altstore/ipa/
 
       - name: 更新 AltStore Source JSON
         run: |
@@ -98,7 +110,7 @@ jobs:
               src = json.load(f)
 
           app = src['apps'][0]
-          url = f"https://github.com/{os.environ['GITHUB_REPOSITORY']}/releases/download/v{version}/{os.environ['IPA_NAME']}"
+          url = f"https://caipanjin.github.io/calligraphy_app/altstore/ipa/{os.environ['IPA_NAME']}"
           now = datetime.now().astimezone().isoformat(timespec='seconds')
 
           entry = {
@@ -136,7 +148,7 @@ jobs:
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add altstore/source.json
+          git add altstore/source.json altstore/ipa/
           if git diff --cached --quiet; then
             echo "no change"
           else
