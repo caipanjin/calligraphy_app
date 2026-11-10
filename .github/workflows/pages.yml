@@ -1,0 +1,48 @@
+name: Deploy AltStore Source to Pages
+
+# 只把 altstore/ 目录发布成静态站点，不做 Jekyll 渲染（legacy 构建在本仓库反复报
+# "Page build failed."，且不给具体原因）。下载直链因此是稳定的：
+#   https://caipanjin.github.io/calligraphy_app/altstore/source.json
+#   https://caipanjin.github.io/calligraphy_app/altstore/ipa/calligraphy-X.Y.Z.ipa
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'altstore/**'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 组装站点目录
+        run: |
+          mkdir -p _site
+          cp -R altstore _site/
+          # 关掉 Jekyll，避免下划线开头的文件被忽略
+          touch _site/.nojekyll
+          ls -R _site | head -30
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      - id: deploy
+        uses: actions/deploy-pages@v4
