@@ -340,6 +340,19 @@ POST 到 dev server 的 `/__debug/report`（请求体上限 24MB）。
   **硬刷新 Cmd+Shift+R → 打开字帖 → 字框编辑页 `⋯` 菜单点「重新切分」** 强制覆盖缓存
   （正式发版整包代码同时更新，旧版本缓存自动过期，不会有此问题）。
 
+### 公众号正文更新：一条命令替换已打开编辑器的正文
+
+改完公众号定稿 md 后，不必手工复制粘贴，也不必重新推理 CDP / 剪贴板 / 粘贴事件：
+
+```bash
+node scripts/update-wechat-body.mjs docs/wechat-article-title1-final.md
+node scripts/update-wechat-body.mjs --check-only    # 只读检查编辑器状态
+```
+
+工具自动探测发布专用 Chrome 的调试端口，整篇替换正文并保住小标题 / 列表 / 代码块排版，
+不动标题、摘要、封面，也不点保存草稿。前置条件、参数、失败兜底与已验证的坑见
+`docs/wechat-editor-workflow.md`。
+
 ### 原生打包
 
 ```bash
@@ -485,7 +498,7 @@ src/
     thumbnail.js           240px 缩略图生成（缓存按哈希，失败不外泄原图）
 
 openspec/changes/          各轮改动的设计记录与踩坑总结
-scripts/                   单元测试、夹具生成与 golden 快照
+scripts/                   单元测试、夹具生成与 golden 快照、公众号正文更新工具
   fixtures/segment/        14 套真实字帖的位压缩掩码与逐框快照
 docs/screens/              界面截图
 ```
