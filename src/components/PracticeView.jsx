@@ -885,19 +885,21 @@ const PracticeView = ({
             <FaImages size={16} />
           </button>
         ) : (
-          <span style={{ width: 44, height: 44 }} aria-hidden="true" />
+          <button
+            className="practice__bar-entry"
+            onClick={onOpenSegment}
+            aria-label={savedBoxes && savedBoxes.length > 0 ? '编辑字框' : '切分字框'}
+          >
+            <FaTh size={13} />
+            <span>
+              {savedBoxes && savedBoxes.length > 0 ? `字框 ${savedBoxes.length}` : '切字'}
+            </span>
+          </button>
         )}
       </div>
 
       {!isCharMode && (
         <div className="practice__body">
-          <div className="stage-actions">
-            <button className="btn btn--ghost btn--block" onClick={onOpenSegment}>
-              <FaTh size={13} />
-              自动切字，逐字临摹
-            </button>
-          </div>
-
           <div
             className="stage-frame"
             ref={frameRef}
@@ -940,8 +942,8 @@ const PracticeView = ({
             <div className="stage-hint">
               <FaRegHandPointer size={11} />
               {savedBoxes && savedBoxes.length > 0
-                ? `点字直接临摹（已切 ${savedBoxes.length} 字）`
-                : '轻触选择要临摹的字'}
+                ? `轻点字格进入临摹（已切 ${savedBoxes.length} 字）`
+                : '轻触选择要临摹的字，或点右上角「切字」自动切分'}
             </div>
           </div>
 

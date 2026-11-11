@@ -1,5 +1,5 @@
 import React from 'react';
-import { FaPlus, FaEllipsisH, FaPen, FaFeatherAlt, FaImages, FaLink, FaTimes } from 'react-icons/fa';
+import { FaPlus, FaTrashAlt, FaPen, FaFeatherAlt, FaImages, FaLink, FaTimes } from 'react-icons/fa';
 import { sumAlbumProgress } from '../utils/albumProgress';
 import { MAX_ALBUMS, MAX_PAGES_PER_ALBUM } from '../utils/albumStore';
 
@@ -127,7 +127,7 @@ const Library = ({
                         onClick={() => onRequestDelete(album.id)}
                         aria-label="删除字帖"
                       >
-                        <FaEllipsisH size={14} />
+                        <FaTrashAlt size={12} />
                       </button>
                     </div>
                   </div>

@@ -489,6 +489,14 @@ button {
   transform: scale(0.97);
 }
 
+/* 禁用态：整体变淡 + 去掉点击反馈，避免"看起来能点、点了没反应" */
+.btn:disabled {
+  opacity: 0.4;
+  box-shadow: none;
+  cursor: default;
+  pointer-events: none;
+}
+
 .btn--primary {
   background: var(--accent);
   color: var(--accent-ink);
@@ -537,6 +545,32 @@ button {
   font-size: 15px;
   letter-spacing: 0.1em;
   color: var(--ink-2);
+}
+
+/* 顶栏右侧常驻的字框入口：把「编辑切分」从大按钮降级为图标 + 计数 */
+.practice__bar-entry {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 34px;
+  padding: 0 11px;
+  border-radius: 999px;
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+  color: var(--ink-2);
+  font-size: 12.5px;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: background 0.15s, color 0.15s;
+}
+
+.practice__bar-entry:active {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.practice__bar-entry span {
+  letter-spacing: 0.04em;
 }
 
 .practice__stage {
@@ -633,6 +667,9 @@ button {
   background: rgba(20, 19, 15, 0.55);
   backdrop-filter: blur(8px);
   pointer-events: none;
+  /* 胶囊始终单行：换行会把提示撑成两块，压住字格 */
+  white-space: nowrap;
+  max-width: calc(100% - 24px);
   animation: hint-in 0.5s ease 0.6s both, hint-out 0.6s ease 4.5s both;
 }
 
@@ -769,11 +806,6 @@ button {
 
 .recent-strip__item:active {
   transform: scale(0.95);
-}
-
-/* 图片模式底部操作区 */
-.stage-actions {
-  padding: 0 0 6px;
 }
 
 /* 单字模式的全景缩略导航 */
@@ -1001,60 +1033,311 @@ button {
   min-width: 0;
 }
 
-/* 分段控件 */
-.segmented {
+/* ---------------- 自动切字（全屏编辑页） ---------------- */
+
+/* 全屏页：与 .sheet 抽屉不同，这里没有背景遮罩，整页就是编辑器本身 */
+.seg-page {
+  position: fixed;
+  inset: 0;
+  z-index: 61;
+  width: 100%;
+  max-width: var(--app-max);
+  margin: 0 auto;
   display: flex;
-  gap: 2px;
-  padding: 3px;
-  margin: 0 0 14px;
-  border-radius: 999px;
-  background: var(--surface-2);
+  flex-direction: column;
+  background: var(--bg);
+  background-image: var(--bg-grad);
+  animation: fade-in 0.16s ease;
+  /* 页面本身不滚动，只有中间的图区滚动，避免手指在图上拖框时带动整页 */
+  overflow: hidden;
 }
 
-.segmented__item {
-  flex: 1;
-  min-height: 38px;
-  border-radius: 999px;
-  font-size: 12.5px;
-  color: var(--ink-3);
-  transition: background 0.16s, color 0.16s;
-}
-
-.segmented__item--active {
-  background: var(--surface);
-  color: var(--ink);
-  box-shadow: var(--shadow-sm);
-}
-
-/* ---------------- 自动切字 ---------------- */
-
-.seg-toggle {
+/* 顶部栏：返回 / 标题 / 撤销 / 更多 */
+.seg-page__bar {
   display: flex;
   align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-  margin: 0 0 12px;
+  gap: 4px;
+  flex-shrink: 0;
+  padding: calc(6px + var(--safe-top)) 8px 6px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.seg-page__title {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  text-align: center;
+}
+
+.seg-page__title b {
+  font-family: var(--font-display);
+  font-size: 15.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--ink);
+}
+
+.seg-page__title span {
+  font-size: 11.5px;
+  color: var(--ink-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+/* 撤销按钮不可用时明显变淡，并明确禁用点击 */
+.seg-page__bar .icon-btn:disabled {
+  opacity: 0.32;
+  cursor: default;
+  pointer-events: none;
+}
+
+/* 中间：图区（唯一可滚动区域） */
+.seg-page__stage {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 10px 12px;
+}
+
+.seg-page__stage .seg-preview {
+  width: 100%;
+  /* 顶部对齐：底部条出现/消失时图片不会上下跳，空余高度留在下方 */
+  margin: 0 auto;
+  /* 不参与 flex 收缩：竖长条字帖按原比例撑开，由 stage 滚动查看下半部分 */
+  flex: 0 0 auto;
+}
+
+.seg-page__stage .sheet-empty,
+.seg-page__stage .seg-hint {
+  margin: auto;
+}
+
+/* 底部：上下文操作条 / 提示 / 切线面板 */
+.seg-page__foot {
+  flex-shrink: 0;
+  border-top: 1px solid var(--line);
+  background: var(--surface);
+  padding: 8px 12px calc(10px + var(--safe-bottom));
+}
+
+/* 选中框后的上下文操作条：只有选中某个框时才出现 */
+.seg-context {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.seg-context__label {
+  font-size: 12px;
+  color: var(--ink-3);
+  letter-spacing: 0.02em;
+}
+
+.seg-context__actions {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+
+/* 四个动作等分一行，图标在上、文字在下：390px 宽也放得下，不会换行 */
+.seg-context__actions .btn {
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  min-height: 50px;
+  padding: 5px 2px;
+  border-radius: var(--radius-md);
+  font-size: 12px;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+/* 工具分组：四个 tab + 一句话说明 */
+.seg-tools {
+  flex-shrink: 0;
+  padding: 8px 12px 6px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+}
+
+.seg-tools__tabs {
+  display: flex;
+  gap: 6px;
+}
+
+.seg-tool {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  min-height: 48px;
+  padding: 4px 2px;
+  border-radius: var(--radius-md);
+  border: 1px solid transparent;
+  background: var(--surface-2);
+  color: var(--ink-2);
+  font-size: 11.5px;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.seg-tool span {
+  letter-spacing: 0.04em;
+}
+
+.seg-tool--active {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.seg-tools__hint {
+  margin: 7px 2px 0;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--ink-3);
+  text-align: center;
+}
+
+/* 「⋯」菜单：从右上角展开的小面板 */
+.seg-menu-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 62;
+  background: rgba(20, 19, 15, 0.28);
+  animation: fade-in 0.14s ease;
+}
+
+.seg-menu {
+  position: fixed;
+  top: calc(60px + var(--safe-top));
+  right: max(8px, calc(50% - var(--app-max) / 2 + 8px));
+  z-index: 63;
+  width: min(268px, calc(100vw - 32px));
+  display: flex;
+  flex-direction: column;
+  padding: 6px;
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+  animation: clip-in 0.14s ease both;
+}
+
+.seg-menu__row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
   padding: 10px 12px;
   border-radius: var(--radius-md);
-  background: var(--surface-2);
-  font-size: 13.5px;
+  text-align: left;
   color: var(--ink);
-  cursor: pointer;
+  font-size: 13.5px;
+  line-height: 1.35;
 }
 
-.seg-toggle input {
-  width: 18px;
-  height: 18px;
-  accent-color: var(--accent);
-  cursor: pointer;
-  flex-shrink: 0;
+.seg-menu__row span {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
-.seg-toggle em {
+.seg-menu__row em {
   font-style: normal;
   font-size: 11.5px;
   color: var(--ink-3);
-  margin-left: auto;
+}
+
+/* 复选框：用自绘方块，避免深色主题下浏览器默认的白色大方块 */
+.seg-menu__row input {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  border-radius: 6px;
+  border: 1.5px solid var(--line-strong);
+  background: var(--surface-2);
+  cursor: pointer;
+  position: relative;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.seg-menu__row input:checked {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.seg-menu__row input:checked::after {
+  content: '';
+  position: absolute;
+  left: 6px;
+  top: 2.5px;
+  width: 5px;
+  height: 10px;
+  border: solid var(--accent-ink);
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+
+.seg-menu__row svg {
+  flex-shrink: 0;
+  color: var(--ink-3);
+}
+
+.seg-menu__row:active {
+  background: var(--surface-2);
+}
+
+/* 切线 / 区域切分面板 */
+.seg-cut-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.seg-cut-panel__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+
+.seg-cut-panel__head > span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.seg-cut-panel__head .btn {
+  min-height: 30px;
+  padding: 0 8px;
+  font-size: 12.5px;
+  flex-shrink: 0;
+}
+
+.seg-cut-panel .seg-cut-bar {
+  margin-top: 0;
+  padding-top: 6px;
 }
 
 
@@ -1096,31 +1379,6 @@ button {
   z-index: 2;
 }
 
-.seg-edit-hint {
-  margin: 0 0 10px;
-  padding: 8px 12px;
-  border-radius: var(--radius-sm);
-  background: var(--accent-soft);
-  font-size: 12.5px;
-  color: var(--ink-2);
-  text-align: center;
-}
-
-.seg-edit-bar {
-  flex-wrap: wrap;
-}
-
-.seg-edit-bar .btn {
-  flex: 1;
-  min-width: 74px;
-  min-height: 42px;
-  font-size: 13.5px;
-}
-
-.seg-edit-bar .btn:disabled {
-  opacity: 0.4;
-}
-
 /* 每个单字的可点区域 */
 /* 画框模式：十字光标 + 禁止图片拖拽 */
 .seg-preview--drawing {
@@ -1140,7 +1398,8 @@ button {
   animation: none;
   align-items: center;
   gap: 6px;
-  margin: 0 18px 10px;
+  width: 100%;
+  margin: 0 0 10px;
   padding: 8px 12px;
   border-radius: var(--radius-sm);
   background: var(--accent-soft);
@@ -1288,30 +1547,27 @@ button {
   color: var(--accent-ink);
 }
 
-.seg-btn--active {
-  border-color: var(--accent);
-  color: var(--accent);
-  background: var(--accent-soft);
-}
-
+/* 候选线面板：编号（或空态说明）独占第一行，两个按钮并排在第二行。
+   窄屏下不会出现「按钮和说明挤在一行、应用被顶到下一行」的错位 */
 .seg-cut-bar {
-  display: flex;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
   align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
+  gap: 6px;
   width: 100%;
   margin-top: 4px;
   padding-top: 8px;
   border-top: 1px solid var(--line);
 }
 .seg-cut-bar .btn {
-  flex: 0 0 auto;
-  min-width: 84px;
-  min-height: 36px;
+  grid-row: 2;
+  min-width: 0;
+  min-height: 38px;
 }
 .seg-cut-chips {
+  grid-row: 1;
+  grid-column: 1 / -1;
   display: flex;
-  flex: 1 1 140px;
   gap: 6px;
   flex-wrap: wrap;
   align-items: center;

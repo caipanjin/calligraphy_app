@@ -770,6 +770,9 @@ const App = () => {
           onSelectCharacter={(character) => {
             setSelectedCharacter(character);
             setShowSegment(false);
+            // 编辑器里可能改过字框，回到临摹页必须重读网格，
+            // 否则点「临摹此字」后上一字/下一字仍按编辑前的旧框跳
+            setGridVersion((value) => value + 1);
           }}
           onClose={() => {
             setShowSegment(false);

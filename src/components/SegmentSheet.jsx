@@ -1,16 +1,19 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  FaTimes,
+  FaChevronLeft,
+  FaUndo,
   FaRedo,
+  FaEllipsisH,
   FaExclamationTriangle,
-  FaHandPointer,
+  FaCheck,
+  FaPen,
+  FaPlus,
   FaTrashAlt,
   FaCompress,
   FaCut,
-  FaPen,
-  FaCheck,
-  FaPlus,
-  FaUndo
+  FaArrowsAlt,
+  FaCropAlt,
+  FaGripLines
 } from 'react-icons/fa';
 import { segmentCharacters, releaseImageElement } from '../utils/segment';
 import { hashImageData } from '../utils/imageHash';
@@ -30,8 +33,18 @@ import {
 import { getCandidateBoundaries } from '../utils/inkProfile';
 import { deleteImagePractice, readImagePractice } from '../utils/practiceStore';
 
-// 字帖一律竖排，不再提供版面切换
-const LAYOUT_OPTIONS = [{ value: 'vertical', label: '竖排' }];
+// 字帖一律竖排：layout 仍是切分缓存的键的一部分，但不给用户切换入口
+
+/**
+ * 四个工具是「你要做什么」的一级分组，每个工具同时只有一种手势生效。
+ * 具体某个框的删除 / 合并 / 拆分不算工具——它们只在选中框后出现。
+ */
+const TOOLS = [
+  { value: 'adjust', label: '调整', icon: FaArrowsAlt },
+  { value: 'add', label: '加框', icon: FaPlus },
+  { value: 'region', label: '区域', icon: FaCropAlt },
+  { value: 'boundary', label: '分界', icon: FaGripLines }
+];
 
 // 选中框上的 8 个拖拽手柄（四角 + 四边），每条边都能单独调整
 const HANDLES = [
@@ -46,7 +59,7 @@ const HANDLES = [
 ];
 
 /**
- * 自动切字抽屉：把整幅字帖按投影切成单字，点任意框直接进入单字临摹
+ * 字框编辑页（全屏）：把整幅字帖按投影切成单字，修正字框后点任意框进入单字临摹
  */
 const SegmentSheet = ({ image, db, onSelectCharacter, onClose }) => {
   const [status, setStatus] = useState('loading');
@@ -60,20 +73,21 @@ const SegmentSheet = ({ image, db, onSelectCharacter, onClose }) => {
   const [settingsLoaded, setSettingsLoaded] = useState(false);
   const [imageSize, setImageSize] = useState({ width: 0, height: 0 });
   const [attempt, setAttempt] = useState(0);
-  // 编辑模式：选中的框索引（null 表示未选中）
-  const [editing, setEditing] = useState(false);
+  // 选中的框索引（null 表示未选中）
   const [selectedIndex, setSelectedIndex] = useState(null);
   // 用户手动修改过的框（非 null 时优先于自动结果，且不写回缓存）
   const [editedBoxes, setEditedBoxes] = useState(null);
   // 破坏性操作前的确认（会重置练习记录）
   const [pendingAction, setPendingAction] = useState(null);
+  // 「⋯」菜单：带格子线、重新切分、还原为自动切分
+  const [menuOpen, setMenuOpen] = useState(false);
   // 画框模式：用户在图上拖拽出一个新框（补切分漏掉的字）
   const [drawing, setDrawing] = useState(false);
   const [draftRect, setDraftRect] = useState(null); // 百分比坐标 {left, top, width, height}
   const draftStartRef = useRef(null);
   const previewRef = useRef(null);
   // 区域切分模式：拖出一个矩形而非单个字框，松手后按该区域的行投影找字间切线。
-  // 只作用于编辑态手动结果（:manual），不改自动切分、不触发算法版本升级。
+  // 只作用于手动结果（:manual），不改自动切分、不触发算法版本升级。
   const [regionMode, setRegionMode] = useState(false);
   const [regionCut, setRegionCut] = useState(null); // { box, lines }
   const [practicedCount, setPracticedCount] = useState(0);
@@ -95,11 +109,12 @@ const SegmentSheet = ({ image, db, onSelectCharacter, onClose }) => {
     setSelectedLines([]);
     setRegionMode(false);
     setRegionCut(null);
+    setMenuOpen(false);
     setHistoryDepth(0);
     historyRef.current = [];
     maskRef.current = null;
     return () => {
-      // 组件卸载（关闭切分面板）时也要放开掩码：1600px 级 ink 缓冲约 2~3MB
+      // 组件卸载（关闭编辑页）时也要放开掩码：1600px 级 ink 缓冲约 2~3MB
       maskRef.current = null;
     };
   }, [image]);
@@ -255,13 +270,23 @@ const SegmentSheet = ({ image, db, onSelectCharacter, onClose }) => {
     return () => clearTimeout(timer);
   }, [retryNotice]);
 
+  const handleClose = useCallback(() => {
+    // 等最后一次写入完成再关闭，保证临摹页重新加载时能读到最新结果
+    saveChainRef.current.then(() => onClose()).catch(() => onClose());
+  }, [onClose]);
+
   useEffect(() => {
     const onKeyDown = (event) => {
-      if (event.key === 'Escape') onClose();
+      if (event.key !== 'Escape') return;
+      if (menuOpen) {
+        setMenuOpen(false);
+        return;
+      }
+      handleClose();
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [onClose]);
+  }, [handleClose, menuOpen]);
 
   const handleRetry = useCallback(() => {
     setRetryPending(true);
@@ -306,11 +331,7 @@ const SegmentSheet = ({ image, db, onSelectCharacter, onClose }) => {
   }, [pendingAction, db, image]);
 
   const selectBox = (box, index) => {
-    if (editing) {
-      setSelectedIndex((current) => (current === index ? null : index));
-      return;
-    }
-    handlePick(box, index);
+    setSelectedIndex((current) => (current === index ? null : index));
   };
 
   const handleBoxClick = (box, index) => {
@@ -359,7 +380,7 @@ const SegmentSheet = ({ image, db, onSelectCharacter, onClose }) => {
         y1: Math.max(...activeColumn.indices.map((i) => boxes[i].y + boxes[i].height))
       }
     : null;
-  // 「切线」栏在两种模式下共用：普通切线用本列候选，区域切分用区域候选
+  // 候选线面板在两种模式下共用：普通切线用本列候选，区域切分用区域候选
   const barLines = regionCut ? regionCut.lines : candidateLines;
 
   // 任意编辑后切到「用户结果」，后续操作都基于它
@@ -369,7 +390,6 @@ const SegmentSheet = ({ image, db, onSelectCharacter, onClose }) => {
     : '';
   const manualKey = baseKey ? `${baseKey}:manual` : '';
 
-  // 编辑结果立即持久化：下次打开直接复用
   /* ---------------- 画框（补漏切的字） ---------------- */
 
   const startDraw = () => {
@@ -503,7 +523,7 @@ const SegmentSheet = ({ image, db, onSelectCharacter, onClose }) => {
       }
       const defaultBox = inferDefaultBox(point);
       if (defaultBox) {
-        setDrawing(false);
+        // 加框工具保持激活：可以连续补几个字，点「调整」或再点一次「加框」退出
         clearPracticeForImage();
         applyBoxes(addBox(boxes, defaultBox, true));
       }
@@ -518,8 +538,8 @@ const SegmentSheet = ({ image, db, onSelectCharacter, onClose }) => {
     };
 
     setDraftRect(null);
-    setDrawing(false);
     if (regionMode) {
+      setDrawing(false);
       setRegionMode(false);
       analyzeRegion(box);
       return;
@@ -585,11 +605,6 @@ const SegmentSheet = ({ image, db, onSelectCharacter, onClose }) => {
   // 避免「刚加完框就关闭」时重新加载读到旧数据
   const saveChainRef = useRef(Promise.resolve());
 
-  const handleClose = useCallback(() => {
-    // 等最后一次写入完成再关闭，保证临摹页重新加载时能读到最新结果
-    saveChainRef.current.then(() => onClose()).catch(() => onClose());
-  }, [onClose]);
-
   const queueSave = (promise) => {
     saveChainRef.current = promise || Promise.resolve();
     return saveChainRef.current;
@@ -631,6 +646,44 @@ const SegmentSheet = ({ image, db, onSelectCharacter, onClose }) => {
     applyBoxes(previous, { record: false });
   };
 
+  /* ---------------- 工具切换 ---------------- */
+
+  // 当前生效的工具由实际手势状态反推，保证 tab 高亮永远和画面一致
+  const tool = regionCut
+    ? 'region'
+    : drawing
+      ? (regionMode ? 'region' : 'add')
+      : cutMode
+        ? 'boundary'
+        : 'adjust';
+
+  /** 切到某个工具；点当前工具则回到「调整」（相当于取消） */
+  const selectTool = (next) => {
+    const target = next === tool ? 'adjust' : next;
+    setDrawing(false);
+    setRegionMode(false);
+    setRegionCut(null);
+    setCutMode(false);
+    setCandidateLines([]);
+    setSelectedLines([]);
+    setDraftRect(null);
+    draftStartRef.current = null;
+    if (target === 'add') {
+      startDraw();
+    } else if (target === 'region') {
+      startRegionDraw();
+    } else if (target === 'boundary') {
+      setCutMode(true);
+    }
+  };
+
+  const exitCutPanel = () => {
+    setCutMode(false);
+    setRegionCut(null);
+    setCandidateLines([]);
+    setSelectedLines([]);
+  };
+
   /* ---------------- 本列切线 / 框拖动（不做跨列对齐） ---------------- */
 
   const toImagePoint = (event) => {
@@ -640,7 +693,7 @@ const SegmentSheet = ({ image, db, onSelectCharacter, onClose }) => {
   };
 
   const startDrag = (event, config) => {
-    if (!editing || drawing) return;
+    if (drawing) return;
     const point = toImagePoint(event);
     if (!point) return;
     event.preventDefault();
@@ -716,13 +769,6 @@ const SegmentSheet = ({ image, db, onSelectCharacter, onClose }) => {
       historyFrom: drag.startBoxes,
       keepSelection: true
     });
-  };
-
-  const toggleCutMode = () => {
-    setRegionCut(null);
-    setCutMode((value) => !value);
-    setCandidateLines([]);
-    setSelectedLines([]);
   };
 
   /** 只在本列范围内找行投影低谷，给出「可能」的字间切线，由用户点选 */
@@ -825,81 +871,152 @@ const SegmentSheet = ({ image, db, onSelectCharacter, onClose }) => {
     deleteSegmentation(db, manualKey);
   };
 
+  /* ---------------- 文案 ---------------- */
+
+  // 版面固定竖排，不再作为信息展示；这里只说"框是怎么来的"
+  const strategyLabel = !result
+    ? ''
+    : editedBoxes
+      ? '已手动调整'
+      : result.strategy === 'grid-lines'
+        ? '按格线切分'
+        : '自动切分';
+
+  const toolHint = (() => {
+    if (tool === 'add') return '轻点补框，或拖出指定大小；可连续补多个';
+    if (tool === 'region') {
+      return regionCut
+        ? `区域切分：找到 ${barLines.length} 条候选线，点编号增减，再点「应用」`
+        : '拖出矩形框住题款 / 小字区域，松手后自动找字间空白';
+    }
+    if (tool === 'boundary') {
+      return selectedIndex === null
+        ? '先点本列任意一个字框，再拖动横线调整相邻两字的边界'
+        : `本列 ${columnCuts.length + 1} 字：拖动横线调边界，上下两字同步不重叠`;
+    }
+    return selectedIndex === null
+      ? '点字框选中后可拖动、拉角改大小'
+      : `已选中第 ${selectedIndex + 1} 个字：可拖动位置、拉四角改大小`;
+  })();
+
   return (
     <>
-      <div className="sheet-backdrop" onClick={handleClose} />
-      <div className="sheet" role="dialog" aria-modal="true" aria-label="自动切字">
-        <div className="sheet__handle" />
-        <div className="sheet__header">
-          <h3 className="sheet__title">
-            自动切字
+      <div className="seg-page" role="dialog" aria-modal="true" aria-label="字框编辑">
+        <div className="seg-page__bar">
+          <button className="icon-btn" onClick={handleClose} aria-label="返回临摹">
+            <FaChevronLeft size={17} />
+          </button>
+          <div className="seg-page__title">
+            <b>字框编辑</b>
             {status === 'done' && (
-              <span className="section-head__hint" style={{ marginLeft: 8 }}>
-                {editedBoxes
-                  ? '已手动调整'
-                  : result.strategy === 'grid-lines'
-                  ? '按格线'
-                  : result.layout === 'vertical'
-                  ? '竖排'
-                  : '横排'}{' '}
-                · {boxes.length} 字
+              <span>
+                {boxes.length} 字 · {strategyLabel}
               </span>
             )}
-          </h3>
-          {status === 'done' && (
-            <button
-              className={`icon-btn${editing ? ' icon-btn--accent' : ''}`}
-              onClick={() => {
-                setEditing((value) => !value);
-                setSelectedIndex(null);
-              }}
-              aria-label={editing ? '完成编辑' : '编辑切分框'}
-              title={editing ? '完成编辑' : '编辑'}
-            >
-              {editing ? <FaCheck size={15} /> : <FaPen size={14} />}
-            </button>
-          )}
-          <button className="icon-btn" onClick={handleClose} aria-label="关闭">
-            <FaTimes size={15} />
+          </div>
+          <button
+            className="icon-btn"
+            onClick={handleUndo}
+            disabled={historyDepth === 0}
+            aria-label="撤销上一步"
+            title="撤销"
+          >
+            <FaUndo size={14} />
+          </button>
+          <button
+            className="icon-btn"
+            onClick={() => setMenuOpen((value) => !value)}
+            aria-label="更多选项"
+            title="更多"
+          >
+            <FaEllipsisH size={15} />
           </button>
         </div>
 
-        <div className="sheet__body">
-          <div className="segmented">
-            {LAYOUT_OPTIONS.map((option) => (
+        {menuOpen && (
+          <>
+            <div className="seg-menu-backdrop" onClick={() => setMenuOpen(false)} />
+            <div className="seg-menu" role="menu">
+              <label className="seg-menu__row">
+                <span>
+                  这张字帖带格子线
+                  <em>开启后按格线切分，更准</em>
+                </span>
+                <input
+                  type="checkbox"
+                  checked={hasGrid}
+                  onChange={(event) => setHasGrid(event.target.checked)}
+                />
+              </label>
               <button
-                key={option.value}
-                className={`segmented__item${layout === option.value ? ' segmented__item--active' : ''}`}
-                onClick={() => setLayout(option.value)}
+                className="seg-menu__row"
+                onClick={() => {
+                  setMenuOpen(false);
+                  confirmIfPracticed(handleRetry);
+                }}
               >
-                {option.label}
+                <span>
+                  重新切分
+                  <em>按当前设置重算全部字框</em>
+                </span>
+                <FaRedo size={12} />
               </button>
-            ))}
+              {editedBoxes && (
+                <button
+                  className="seg-menu__row"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    handleResetEdit();
+                  }}
+                >
+                  <span>
+                    还原为自动切分
+                    <em>丢弃这次的手动调整</em>
+                  </span>
+                  <FaUndo size={12} />
+                </button>
+              )}
+            </div>
+          </>
+        )}
+
+        {status === 'done' && (
+          <div className="seg-tools">
+            <div className="seg-tools__tabs" role="tablist" aria-label="编辑工具">
+              {TOOLS.map((item) => {
+                const Icon = item.icon;
+                return (
+                  <button
+                    key={item.value}
+                    className={`seg-tool${tool === item.value ? ' seg-tool--active' : ''}`}
+                    onClick={() => selectTool(item.value)}
+                    role="tab"
+                    aria-selected={tool === item.value}
+                  >
+                    <Icon size={15} />
+                    <span>{item.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+            <p className="seg-tools__hint">{toolHint}</p>
           </div>
+        )}
 
-          <label className="seg-toggle">
-            <input
-              type="checkbox"
-              checked={hasGrid}
-              onChange={(event) => setHasGrid(event.target.checked)}
-            />
-            <span>这张字帖带格子线</span>
-            <em>开启后按格线切分，更准</em>
-          </label>
-
+        <div className="seg-page__stage">
           {status === 'loading' && <div className="seg-hint">正在分析版面…</div>}
 
           {status === 'error' && (
             <div className="sheet-empty">
               <FaExclamationTriangle />
-              <span>切分失败，可换一张图或直接手动点选单字。</span>
+              <span>切分失败。可点右上角「⋯」重新切分，或返回后直接轻触图片选字。</span>
             </div>
           )}
 
           {status === 'empty' && (
             <div className="sheet-empty">
               <FaExclamationTriangle />
-              <span>没有找到可切分的文字区域。字距太密或背景较脏时，建议手动点选。</span>
+              <span>没有找到可切分的文字区域。字距太密或背景较脏时，可返回后直接轻触图片选字。</span>
             </div>
           )}
 
@@ -907,24 +1024,6 @@ const SegmentSheet = ({ image, db, onSelectCharacter, onClose }) => {
             <div className={`seg-retry-notice${retryPending ? ' seg-retry-notice--pending' : ''}`}>
               {retryPending ? <FaRedo size={12} /> : <FaCheck size={12} />}
               {retryPending ? '正在重新切分…' : retryNotice}
-            </div>
-          )}
-
-          {status === 'done' && editing && (
-            <div className="seg-edit-hint">
-              {regionMode
-                ? '区域切分：拖拽框选题款 / 小字区域，松手后自动找字间切线'
-                : drawing
-                  ? '在图片上单击生成一个默认大小的框，或拖拽画出指定大小'
-                  : regionCut
-                    ? `区域切分：找到 ${barLines.length} 条候选线 · 点编号微调，再点「应用」一次生成字框`
-                    : cutMode
-                      ? selectedIndex === null
-                        ? '切线模式：先点本列任意一个框'
-                        : `本列 ${columnCuts.length + 1} 字 · 拖动横线调相邻两字边界，框可整体拖动或拉角`
-                      : selectedIndex === null
-                        ? '点击任意框选中，再选择下方操作；框可直接拖动'
-                        : `已选中第 ${selectedIndex + 1} 个框，可拖动或拉角调整`}
             </div>
           )}
 
@@ -947,7 +1046,7 @@ const SegmentSheet = ({ image, db, onSelectCharacter, onClose }) => {
               {boxes.map((box, index) => (
                 <div
                   key={`${index}-${Math.round(box.x)}-${Math.round(box.y)}`}
-                  className={`seg-box${editing ? ' seg-box--editable' : ''}${
+                  className={`seg-box${drawing ? '' : ' seg-box--editable'}${
                     selectedIndex === index ? ' seg-box--selected' : ''
                   }`}
                   style={{
@@ -968,7 +1067,7 @@ const SegmentSheet = ({ image, db, onSelectCharacter, onClose }) => {
                   tabIndex={0}
                   aria-label={`第 ${index + 1} 个字`}
                 >
-                  {editing && selectedIndex === index &&
+                  {!drawing && selectedIndex === index &&
                     HANDLES.map((handle) => (
                       <span
                         key={handle.edge}
@@ -981,7 +1080,7 @@ const SegmentSheet = ({ image, db, onSelectCharacter, onClose }) => {
                     ))}
                 </div>
               ))}
-              {cutMode && editing && columnRange && (
+              {cutMode && columnRange && (
                 <>
                   {columnCuts.map((y, i) => (
                     <div
@@ -1031,114 +1130,91 @@ const SegmentSheet = ({ image, db, onSelectCharacter, onClose }) => {
           )}
         </div>
 
-        {status === 'done' && editing ? (
-          <div className="sheet__footer seg-edit-bar">
-            <button className="btn btn--ghost" onClick={handleDelete} disabled={selectedIndex === null}>
-              <FaTrashAlt size={13} />
-              删除
-            </button>
-            <button className="btn btn--ghost" onClick={handleMerge} disabled={selectedIndex === null}>
-              <FaCompress size={13} />
-              合并
-            </button>
-            <button className="btn btn--ghost" onClick={handleSplit} disabled={selectedIndex === null}>
-              <FaCut size={13} />
-              拆分
-            </button>
-            {drawing ? (
-              <button className="btn btn--text" onClick={cancelDraw}>
-                取消{regionMode ? '区域' : '加框'}
-              </button>
-            ) : (
-              <>
-                <button className="btn btn--ghost" onClick={startDraw}>
-                  <FaPlus size={13} />
-                  加框
-                </button>
-                <button
-                  className={`btn btn--ghost${regionCut ? ' seg-btn--active' : ''}`}
-                  onClick={startRegionDraw}
-                >
-                  区域切分
-                </button>
-              </>
-            )}
-            <button
-              className={`btn btn--ghost${cutMode ? ' seg-btn--active' : ''}`}
-              onClick={toggleCutMode}
-              disabled={selectedIndex === null && !cutMode}
-            >
-              切线
-            </button>
-            <button className="btn btn--ghost" onClick={handleUndo} disabled={historyDepth === 0}>
-              <FaUndo size={13} />
-              撤销
-            </button>
-            {editedBoxes && (
-              <button className="btn btn--text" onClick={handleResetEdit}>
-                还原
-              </button>
-            )}
-            {(cutMode || regionCut) && (
-              <div className="seg-cut-bar">
-                <button
-                  className="btn btn--ghost"
-                  onClick={regionCut ? () => analyzeRegion(regionCut.box) : handleFindCandidates}
-                  disabled={(!columnRange && !regionCut) || profilePending}
-                >
-                  {profilePending ? '分析中…' : '找候选线'}
-                </button>
-                <div className="seg-cut-chips">
-                  {barLines.length === 0 ? (
-                    <span className="seg-cut-bar__hint">
-                      {regionCut
-                        ? '该区域没找到字间空白：换个范围重试，或直接用「加框」补字'
-                        : '候选线只来自本列：点编号选取，应用后按所选切线重切本列'}
-                    </span>
-                  ) : (
-                    barLines.map((y, i) => (
-                      <button
-                        key={y}
-                        className={`seg-cut-chip${selectedLines.includes(y) ? ' seg-cut-chip--on' : ''}`}
-                        onClick={() => toggleCandidateLine(y)}
-                        aria-label={`候选线 ${i + 1}`}
-                        aria-pressed={selectedLines.includes(y)}
-                      >
-                        {i + 1}
-                      </button>
-                    ))
-                  )}
-                </div>
-                <button
-                  className="btn btn--primary"
-                  onClick={regionCut ? handleApplyRegionCuts : handleApplyCuts}
-                  disabled={selectedLines.length === 0}
-                >
-                  应用{selectedLines.length > 0 ? ` (${selectedLines.length})` : ''}
-                </button>
-                {regionCut && (
-                  <button
-                    className="btn btn--text"
-                    onClick={() => { setRegionCut(null); setSelectedLines([]); }}
-                  >
-                    取消区域
+        {/* 底部条只在有实际内容时出现：切线面板 或 选中框的操作条。
+            空态不占位，把高度让给图片；说明统一放在顶部工具提示里，不重复 */}
+        {status === 'done' && (cutMode || regionCut || selectedIndex !== null) && (
+          <div className="seg-page__foot">
+            {cutMode || regionCut ? (
+              <div className="seg-cut-panel">
+                <div className="seg-cut-panel__head">
+                  <span>
+                    {regionCut
+                      ? `区域切分 · ${barLines.length} 条候选线`
+                      : selectedIndex === null
+                        ? '分界：先点本列任意一个字框'
+                        : `本列 ${columnCuts.length + 1} 字 · ${barLines.length} 条候选线`}
+                  </span>
+                  <button className="btn btn--text" onClick={exitCutPanel}>
+                    退出
                   </button>
+                </div>
+                {/* 还没选中本列时不显示「找候选线 / 应用」，避免一排灰按钮让人以为坏了 */}
+                {(regionCut || columnRange) && (
+                  <div className="seg-cut-bar">
+                    <button
+                      className="btn btn--ghost"
+                      onClick={regionCut ? () => analyzeRegion(regionCut.box) : handleFindCandidates}
+                      disabled={profilePending}
+                    >
+                      {profilePending ? '分析中…' : '找候选线'}
+                    </button>
+                    <div className="seg-cut-chips">
+                      {barLines.length === 0 ? (
+                        <span className="seg-cut-bar__hint">
+                          {regionCut
+                            ? '没找到字间空白：换个范围重试，或用「加框」补字'
+                            : '先点「找候选线」，再从编号里挑要切的线'}
+                        </span>
+                      ) : (
+                        barLines.map((y, i) => (
+                          <button
+                            key={y}
+                            className={`seg-cut-chip${selectedLines.includes(y) ? ' seg-cut-chip--on' : ''}`}
+                            onClick={() => toggleCandidateLine(y)}
+                            aria-label={`候选线 ${i + 1}`}
+                            aria-pressed={selectedLines.includes(y)}
+                          >
+                            {i + 1}
+                          </button>
+                        ))
+                      )}
+                    </div>
+                    <button
+                      className="btn btn--primary"
+                      onClick={regionCut ? handleApplyRegionCuts : handleApplyCuts}
+                      disabled={selectedLines.length === 0}
+                    >
+                      应用{selectedLines.length > 0 ? ` (${selectedLines.length})` : ''}
+                    </button>
+                  </div>
                 )}
               </div>
-            )}
-          </div>
-        ) : (
-          <div className="sheet__footer">
-            {status !== 'loading' && (
-              <button className="btn btn--ghost" onClick={() => confirmIfPracticed(handleRetry)}>
-                <FaRedo size={13} />
-                重新切分
-              </button>
-            )}
-            <button className="btn btn--primary btn--block" onClick={onClose}>
-              <FaHandPointer size={13} />
-              手动点选
-            </button>
+            ) : selectedIndex !== null ? (
+              <div className="seg-context">
+                <span className="seg-context__label">第 {selectedIndex + 1} 个字</span>
+                <div className="seg-context__actions">
+                  <button
+                    className="btn btn--ghost"
+                    onClick={() => handlePick(boxes[selectedIndex], selectedIndex)}
+                  >
+                    <FaPen size={12} />
+                    临摹此字
+                  </button>
+                  <button className="btn btn--ghost" onClick={handleDelete}>
+                    <FaTrashAlt size={12} />
+                    删除
+                  </button>
+                  <button className="btn btn--ghost" onClick={handleMerge}>
+                    <FaCompress size={12} />
+                    合并
+                  </button>
+                  <button className="btn btn--ghost" onClick={handleSplit}>
+                    <FaCut size={12} />
+                    拆分
+                  </button>
+                </div>
+              </div>
+            ) : null}
           </div>
         )}
       </div>
